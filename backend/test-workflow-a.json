@@ -1,0 +1,227 @@
+{
+  "name": "[TEST] Workflow A - User API",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "manual-trigger",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 模擬前端送來的註冊資料\n// 請修改這裡的測試資料\nreturn [{\n  json: {\n    body: {\n      userId: 'U_TEST_USER_001',\n      realName: '測試用戶',\n      aliases: ['測試', '小測', 'Tester'],\n      sheetUrls: [\n        {\n          id: '1abc123def456',\n          name: '每日進度表',\n          url: 'https://docs.google.com/spreadsheets/d/1abc123def456'\n        }\n      ],\n      sheetConfigs: {\n        '1abc123def456': {\n          name_column: 'B',\n          date_column: 'A',\n          progress_column: 'D',\n          sheet_name: '每日進度表'\n        }\n      }\n    },\n    query: {\n      userId: 'U_TEST_USER_001'\n    }\n  }\n}];"
+      },
+      "id": "mock-data",
+      "name": "Mock Request Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "options": {
+          "reset": false
+        }
+      },
+      "id": "switch-action",
+      "name": "Choose Action",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [650, 300],
+      "parameters": {
+        "rules": {
+          "values": [
+            { "outputKey": "register", "value": "register" },
+            { "outputKey": "profile", "value": "profile" }
+          ]
+        },
+        "dataType": "string",
+        "value": "={{ 'register' }}"
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "check-userid",
+              "leftValue": "={{ $json.body.userId }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "notEmpty" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "validate-register",
+      "name": "Validate Register Data",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [850, 200]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "mode": "id", "value": "={{ $env.MASTER_SYNC_SHEET_ID }}" },
+        "sheetName": { "__rl": true, "mode": "name", "value": "Master_Sync" },
+        "filters": {
+          "conditions": [
+            { "lookupColumn": "Line_UID", "lookupValue": "={{ $json.body.userId }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "sheets-check-exists",
+      "name": "Check User Exists",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1050, 200],
+      "credentials": { "googleSheetsOAuth2Api": { "id": "google-sheets-cred", "name": "Google Sheets" } }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "check-exists",
+              "leftValue": "={{ $input.all().length }}",
+              "rightValue": 0,
+              "operator": { "type": "number", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "if-exists",
+      "name": "User Exists?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1250, 200]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "id", "value": "={{ $env.MASTER_SYNC_SHEET_ID }}" },
+        "sheetName": { "__rl": true, "mode": "name", "value": "Master_Sync" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Line_UID": "={{ $('Mock Request Data').item.json.body.userId }}",
+            "Real_Name": "={{ $('Mock Request Data').item.json.body.realName }}",
+            "Aliases": "={{ $('Mock Request Data').item.json.body.aliases.join(',') }}",
+            "Target_Sheet_IDs": "={{ $('Mock Request Data').item.json.body.sheetUrls.map(s => s.id).join(',') }}",
+            "Sheet_Configs": "={{ JSON.stringify($('Mock Request Data').item.json.body.sheetConfigs || {}) }}",
+            "Created_At": "={{ $now.format('YYYY-MM-DD HH:mm:ss') }}",
+            "Updated_At": "={{ $now.format('YYYY-MM-DD HH:mm:ss') }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "sheets-append",
+      "name": "Append New User",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1450, 100],
+      "credentials": { "googleSheetsOAuth2Api": { "id": "google-sheets-cred", "name": "Google Sheets" } }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": { "__rl": true, "mode": "id", "value": "={{ $env.MASTER_SYNC_SHEET_ID }}" },
+        "sheetName": { "__rl": true, "mode": "name", "value": "Master_Sync" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Line_UID": "={{ $('Mock Request Data').item.json.body.userId }}",
+            "Real_Name": "={{ $('Mock Request Data').item.json.body.realName }}",
+            "Aliases": "={{ $('Mock Request Data').item.json.body.aliases.join(',') }}",
+            "Target_Sheet_IDs": "={{ $('Mock Request Data').item.json.body.sheetUrls.map(s => s.id).join(',') }}",
+            "Sheet_Configs": "={{ JSON.stringify($('Mock Request Data').item.json.body.sheetConfigs || {}) }}",
+            "Updated_At": "={{ $now.format('YYYY-MM-DD HH:mm:ss') }}"
+          }
+        },
+        "options": { "cellFormat": "USER_ENTERED" }
+      },
+      "id": "sheets-update",
+      "name": "Update Existing User",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1450, 300],
+      "credentials": { "googleSheetsOAuth2Api": { "id": "google-sheets-cred", "name": "Google Sheets" } }
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{\n  json: {\n    success: true,\n    data: { message: '使用者資料已儲存' },\n    error: null\n  }\n}];"
+      },
+      "id": "success-response",
+      "name": "Success Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1650, 200]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "mode": "id", "value": "={{ $env.MASTER_SYNC_SHEET_ID }}" },
+        "sheetName": { "__rl": true, "mode": "name", "value": "Master_Sync" },
+        "filters": {
+          "conditions": [
+            { "lookupColumn": "Line_UID", "lookupValue": "={{ $json.query.userId }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "sheets-get-profile",
+      "name": "Get User Profile",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [850, 400],
+      "credentials": { "googleSheetsOAuth2Api": { "id": "google-sheets-cred", "name": "Google Sheets" } }
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.all();\n\nif (data.length === 0) {\n  return [{ json: { success: false, data: null, error: '使用者不存在' } }];\n}\n\nconst user = data[0].json;\nreturn [{\n  json: {\n    success: true,\n    data: {\n      userId: user.Line_UID,\n      realName: user.Real_Name,\n      aliases: user.Aliases ? user.Aliases.split(',') : [],\n      sheetIds: user.Target_Sheet_IDs ? user.Target_Sheet_IDs.split(',') : [],\n      sheetConfigs: user.Sheet_Configs ? JSON.parse(user.Sheet_Configs) : {},\n      createdAt: user.Created_At,\n      updatedAt: user.Updated_At\n    },\n    error: null\n  }\n}];"
+      },
+      "id": "format-profile",
+      "name": "Format Profile Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1050, 400]
+    }
+  ],
+  "connections": {
+    "Manual Trigger": { "main": [[{ "node": "Mock Request Data", "type": "main", "index": 0 }]] },
+    "Mock Request Data": { "main": [[{ "node": "Choose Action", "type": "main", "index": 0 }]] },
+    "Choose Action": {
+      "main": [
+        [{ "node": "Validate Register Data", "type": "main", "index": 0 }],
+        [{ "node": "Get User Profile", "type": "main", "index": 0 }]
+      ]
+    },
+    "Validate Register Data": {
+      "main": [
+        [{ "node": "Check User Exists", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Check User Exists": { "main": [[{ "node": "User Exists?", "type": "main", "index": 0 }]] },
+    "User Exists?": {
+      "main": [
+        [{ "node": "Append New User", "type": "main", "index": 0 }],
+        [{ "node": "Update Existing User", "type": "main", "index": 0 }]
+      ]
+    },
+    "Append New User": { "main": [[{ "node": "Success Response", "type": "main", "index": 0 }]] },
+    "Update Existing User": { "main": [[{ "node": "Success Response", "type": "main", "index": 0 }]] },
+    "Get User Profile": { "main": [[{ "node": "Format Profile Response", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "staticData": null,
+  "tags": [{ "name": "test" }],
+  "triggerCount": 1,
+  "pinData": {}
+}

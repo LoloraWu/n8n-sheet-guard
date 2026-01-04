@@ -1,0 +1,153 @@
+{
+  "name": "[TEST] Workflow C - Daily Notifier",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "manual-trigger",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "mode": "id", "value": "={{ $env.MASTER_SYNC_SHEET_ID }}" },
+        "sheetName": { "__rl": true, "mode": "name", "value": "Master_Sync" },
+        "options": {}
+      },
+      "id": "sheets-get-all-users",
+      "name": "Get All Users",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [450, 300],
+      "credentials": { "googleSheetsOAuth2Api": { "id": "google-sheets-cred", "name": "Google Sheets" } }
+    },
+    {
+      "parameters": {
+        "jsCode": "const users = $input.all();\nconst results = [];\n\nfor (const userItem of users) {\n  const user = userItem.json;\n  const sheetIds = user.Target_Sheet_IDs ? user.Target_Sheet_IDs.split(',').map(s => s.trim()).filter(s => s) : [];\n  const configs = user.Sheet_Configs ? JSON.parse(user.Sheet_Configs) : {};\n  const aliases = user.Aliases ? user.Aliases.split(',').map(s => s.trim()) : [];\n  \n  if (sheetIds.length === 0) {\n    results.push({\n      json: {\n        lineUserId: user.Line_UID,\n        realName: user.Real_Name,\n        skip: true,\n        reason: 'No sheets configured'\n      }\n    });\n    continue;\n  }\n  \n  results.push({\n    json: {\n      lineUserId: user.Line_UID,\n      realName: user.Real_Name,\n      aliases,\n      sheetIds,\n      configs,\n      skip: false\n    }\n  });\n}\n\nreturn results;"
+      },
+      "id": "code-prepare-users",
+      "name": "Prepare All Users",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "check-skip",
+              "leftValue": "={{ $json.skip }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "notEquals" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "if-should-process",
+      "name": "Should Process?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 模擬檢查結果（不實際讀取 Sheet）\nconst user = $input.first().json;\nconst missingReports = [];\n\n// 隨機產生 0-2 個未填報表作為測試\nconst numMissing = Math.floor(Math.random() * 3);\n\nfor (let i = 0; i < Math.min(numMissing, user.sheetIds.length); i++) {\n  const sheetId = user.sheetIds[i];\n  const config = user.configs[sheetId];\n  missingReports.push({\n    sheetId,\n    sheetName: config?.sheet_name || `報表 ${i + 1}`,\n    sheetUrl: `https://docs.google.com/spreadsheets/d/${sheetId}`\n  });\n}\n\nreturn [{\n  json: {\n    lineUserId: user.lineUserId,\n    realName: user.realName,\n    missingCount: missingReports.length,\n    missingReports,\n    shouldNotify: missingReports.length > 0\n  }\n}];"
+      },
+      "id": "code-mock-check",
+      "name": "Mock Status Check",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1050, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "check-notify",
+              "leftValue": "={{ $json.shouldNotify }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "if-should-notify",
+      "name": "Should Notify?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1250, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\nlet message = `[提醒] ${data.realName}，您今日尚有 ${data.missingCount} 份報表未填寫：\\n`;\n\ndata.missingReports.forEach((report, index) => {\n  message += `${index + 1}. ${report.sheetName}\\n   ${report.sheetUrl}\\n`;\n});\n\nreturn [{\n  json: {\n    lineUserId: data.lineUserId,\n    realName: data.realName,\n    message: message.trim(),\n    // 測試模式：不實際發送\n    testMode: true\n  }\n}];"
+      },
+      "id": "code-format-message",
+      "name": "Format LINE Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1450, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 測試模式：僅輸出訊息內容，不實際發送 LINE\nconst data = $input.first().json;\n\nconsole.log('=== 測試模式：LINE 推播內容 ===');\nconsole.log('收件人 ID:', data.lineUserId);\nconsole.log('收件人姓名:', data.realName);\nconsole.log('訊息內容:');\nconsole.log(data.message);\nconsole.log('================================');\n\nreturn [{\n  json: {\n    testResult: 'LINE 訊息已準備好（測試模式未實際發送）',\n    lineUserId: data.lineUserId,\n    message: data.message\n  }\n}];"
+      },
+      "id": "code-mock-send",
+      "name": "Mock LINE Send",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1650, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\nreturn [{\n  json: {\n    testResult: '使用者已全部填寫完成，無需通知',\n    lineUserId: data.lineUserId,\n    realName: data.realName\n  }\n}];"
+      },
+      "id": "code-skip-notify",
+      "name": "Skip Notification",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1450, 450]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\nreturn [{\n  json: {\n    testResult: '跳過處理：尚未設定關注報表',\n    lineUserId: data.lineUserId,\n    reason: data.reason\n  }\n}];"
+      },
+      "id": "code-skip-no-sheets",
+      "name": "Skip No Sheets",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1050, 450]
+    }
+  ],
+  "connections": {
+    "Manual Trigger": { "main": [[{ "node": "Get All Users", "type": "main", "index": 0 }]] },
+    "Get All Users": { "main": [[{ "node": "Prepare All Users", "type": "main", "index": 0 }]] },
+    "Prepare All Users": { "main": [[{ "node": "Should Process?", "type": "main", "index": 0 }]] },
+    "Should Process?": {
+      "main": [
+        [{ "node": "Mock Status Check", "type": "main", "index": 0 }],
+        [{ "node": "Skip No Sheets", "type": "main", "index": 0 }]
+      ]
+    },
+    "Mock Status Check": { "main": [[{ "node": "Should Notify?", "type": "main", "index": 0 }]] },
+    "Should Notify?": {
+      "main": [
+        [{ "node": "Format LINE Message", "type": "main", "index": 0 }],
+        [{ "node": "Skip Notification", "type": "main", "index": 0 }]
+      ]
+    },
+    "Format LINE Message": { "main": [[{ "node": "Mock LINE Send", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "staticData": null,
+  "tags": [{ "name": "test" }],
+  "triggerCount": 1,
+  "pinData": {}
+}

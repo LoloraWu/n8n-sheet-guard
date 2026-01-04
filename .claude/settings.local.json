@@ -1,0 +1,32 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:github.com)",
+      "Bash(claude mcp add n8n-mcp -e MCP_MODE=stdio -e LOG_LEVEL=error -e DISABLE_CONSOLE_OUTPUT=true -e N8N_API_URL=https://lorawu.app.n8n.cloud -e N8N_API_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2YWQ0ZWYyOS1hZmQwLTQ3NzYtOTA3OC00ZjZjMzQxNmNlODIiLCJpc3MiOiJuOG4iLCJhdWQiOiJwdWJsaWMtYXBpIiwiaWF0IjoxNzY3NDU1MzM4LCJleHAiOjE3NzUxNDU2MDB9.rHuvUW9fZxJtMM-toMMhO4tk2zlTgzji74VQzY-9ReY -- npx n8n-mcp)",
+      "mcp__n8n-mcp__tools_documentation",
+      "mcp__n8n-mcp__search_nodes",
+      "mcp__n8n-mcp__get_node",
+      "Bash(claude mcp list:*)",
+      "Bash(dir /s /b \"%USERPROFILE%\\\\.claude*\")",
+      "Bash(curl -s -X POST \"https://lorawu.app.n8n.cloud/api/v1/workflows\" )",
+      "Bash(dir \"%USERPROFILE%\\\\.claude\")",
+      "Bash(dir:*)",
+      "Bash(cat:*)",
+      "Bash(curl:*)",
+      "mcp__n8n-mcp__search_templates",
+      "mcp__n8n-mcp__get_template",
+      "Bash(findstr:*)",
+      "Skill(n8n-operations)",
+      "Bash(mkdir:*)",
+      "WebFetch(domain:lorawu.app.n8n.cloud)",
+      "Bash(where:*)",
+      "Bash(npx n8n-mcp:*)",
+      "Bash(MCP_MODE=stdio LOG_LEVEL=error DISABLE_CONSOLE_OUTPUT=true N8N_API_URL=https://lorawu.app.n8n.cloud N8N_API_KEY=\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2YWQ0ZWYyOS1hZmQwLTQ3NzYtOTA3OC00ZjZjMzQxNmNlODIiLCJpc3MiOiJuOG4iLCJhdWQiOiJwdWJsaWMtYXBpIiwiaWF0IjoxNzY3NTQyMzY0LCJleHAiOjE3NzAwNDgwMDB9.3bhFtRtWxVoQ6mk8Y6MjnlWJV2HVz0op-o_fyuZBTnM\" npx n8n-mcp:*)",
+      "Bash(tasklist:*)",
+      "Bash(npm install:*)",
+      "mcp__n8n-mcp__validate_workflow",
+      "Bash(python:*)",
+      "WebSearch"
+    ]
+  }
+}

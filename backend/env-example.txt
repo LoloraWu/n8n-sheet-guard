@@ -1,0 +1,13 @@
+# n8n 環境變數設定範例
+# 在 n8n 設定 > Variables 中新增這些變數
+
+# Google Sheets Master_Sync 的試算表 ID
+# 從 URL 取得: https://docs.google.com/spreadsheets/d/{SHEET_ID}/edit
+MASTER_SYNC_SHEET_ID=your_google_sheet_id_here
+
+# LINE Messaging API Channel Access Token
+# 從 LINE Developers Console 取得
+LINE_CHANNEL_ACCESS_TOKEN=your_line_channel_access_token_here
+
+# OpenAI API Key (用於 AI 判定)
+OPENAI_API_KEY=your_openai_api_key_here

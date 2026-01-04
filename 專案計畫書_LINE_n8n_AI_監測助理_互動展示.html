@@ -1,0 +1,706 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LINE x n8n x AI 監測助理 | 專案互動計畫書</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&display=swap');
+        
+        body {
+            font-family: 'Noto Sans TC', sans-serif;
+            background-color: #fdfbf7; /* Warm neutral background */
+            color: #4a4a4a;
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #d6d3d1;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #a8a29e;
+        }
+
+        /* Chart Container Styling - Mandatory Requirements */
+        .chart-container {
+            position: relative;
+            width: 100%;
+            max-width: 600px;
+            margin-left: auto;
+            margin-right: auto;
+            height: 300px;
+            max-height: 400px;
+        }
+        @media (min-width: 768px) {
+            .chart-container {
+                height: 350px;
+            }
+        }
+
+        /* Chat Bubble Animations */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .message-anim {
+            animation: fadeIn 0.3s ease-out forwards;
+        }
+
+        .tab-active {
+            border-bottom: 2px solid #ea580c; /* Orange-600 */
+            color: #ea580c;
+            font-weight: 500;
+        }
+        .tab-inactive {
+            color: #78716c; /* Stone-500 */
+        }
+        .tab-inactive:hover {
+            color: #44403c; /* Stone-700 */
+        }
+
+        /* Card Hover Effect */
+        .interactive-card {
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+        .interactive-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            border-color: #ea580c;
+        }
+    </style>
+    <!-- Chosen Palette: Warm Neutrals (Stone/Orange/Slate) - Stone (#fdfbf7, #e7e5e4, #44403c) with Warm Orange Accents (#ea580c) for actions/highlights. Represents stability and utility. -->
+    
+    <!-- Application Structure Plan: 
+         1. Hero Section: Overview of the project vision.
+         2. Scenario Simulator (Interactive): Users can "play" the 5 scenarios (A-E) in a mock LINE interface to understand the UX flow.
+         3. Workflow & Architecture (Exploratory): Tabbed view of the 3 workflows + AI Logic, allowing users to drill down into technical details (Regex, Prompts).
+         4. Data Model (Visual): A visual representation of the Master_Sync table.
+         5. Implementation Tracker (Dynamic): A checklist that updates a Chart.js Doughnut chart, visualizing project progress.
+         
+         Why this structure? It moves from "What it looks like" (Simulator) to "How it works" (Architecture) to "Current Status" (Tracker), catering to both stakeholders and developers.
+    -->
+
+    <!-- Visualization & Content Choices:
+         - Simulator: HTML/JS Chat Interface -> Goal: Inform/Experience -> Shows exactly how the bot interacts.
+         - Workflow Tabs: Interactive Cards -> Goal: Organize -> Breaks down complex logic into digestible steps.
+         - Implementation Chart: Chart.js Doughnut -> Goal: Inform/Track -> Visualizes the completion rate of the checklist.
+         - Robustness Cards: Grid Layout -> Goal: Inform -> Highlights key technical solutions.
+    -->
+    <!-- CONFIRMATION: NO SVG graphics used. NO Mermaid JS used. -->
+</head>
+<body class="antialiased">
+
+    <!-- Navigation / Header -->
+    <nav class="bg-white border-b border-stone-200 sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-16">
+                <div class="flex items-center">
+                    <span class="text-2xl font-bold text-stone-800 tracking-tight">監測助理 <span class="text-orange-600">Plan</span></span>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <a href="#simulator" class="text-stone-600 hover:text-orange-600 px-3 py-2 text-sm font-medium">體驗模擬</a>
+                    <a href="#architecture" class="text-stone-600 hover:text-orange-600 px-3 py-2 text-sm font-medium">系統架構</a>
+                    <a href="#implementation" class="text-stone-600 hover:text-orange-600 px-3 py-2 text-sm font-medium">實作進度</a>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <div class="bg-stone-50 py-12 border-b border-stone-200">
+        <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+            <h1 class="text-4xl font-extrabold text-stone-900 sm:text-5xl mb-4">
+                LINE x n8n x AI <br><span class="text-orange-600">跨表填寫狀態監測助理</span>
+            </h1>
+            <p class="mt-4 text-xl text-stone-600 max-w-3xl mx-auto">
+                解決 Google Sheets 協作遺漏問題的自動化解決方案。結合 LINE 的即時性、n8n 的自動化流程以及 LLM 的語意理解，打造無縫的填寫提醒體驗。
+            </p>
+            <div class="mt-8 flex justify-center gap-4">
+                <div class="flex flex-col items-center p-4 bg-white rounded-lg shadow-sm border border-stone-100 w-24">
+                    <span class="text-2xl mb-1">💬</span>
+                    <span class="text-xs font-bold text-stone-500">LINE API</span>
+                </div>
+                <div class="flex flex-col items-center p-4 bg-white rounded-lg shadow-sm border border-stone-100 w-24">
+                    <span class="text-2xl mb-1">⚡</span>
+                    <span class="text-xs font-bold text-stone-500">n8n Cloud</span>
+                </div>
+                <div class="flex flex-col items-center p-4 bg-white rounded-lg shadow-sm border border-stone-100 w-24">
+                    <span class="text-2xl mb-1">🧠</span>
+                    <span class="text-xs font-bold text-stone-500">AI Node</span>
+                </div>
+                <div class="flex flex-col items-center p-4 bg-white rounded-lg shadow-sm border border-stone-100 w-24">
+                    <span class="text-2xl mb-1">📊</span>
+                    <span class="text-xs font-bold text-stone-500">Sheets</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Section 2: Scenario Simulator -->
+    <section id="simulator" class="py-16 bg-white">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-12">
+                <!-- Left: Controls -->
+                <div>
+                    <h2 class="text-3xl font-bold text-stone-900 mb-6">情境模擬器 (User Journey)</h2>
+                    <p class="text-stone-600 mb-8">
+                        點擊下方情境按鈕，模擬使用者與系統的互動流程。這能幫助您理解系統如何在不同場景下運作。
+                    </p>
+                    
+                    <div class="space-y-4">
+                        <button onclick="playScenario('A')" class="interactive-card w-full text-left p-4 bg-stone-50 border border-stone-200 rounded-xl hover:bg-orange-50 group">
+                            <div class="flex justify-between items-center">
+                                <span class="font-bold text-stone-800 group-hover:text-orange-700">情境 A：新用戶加入 (Onboarding)</span>
+                                <span class="text-stone-400">→</span>
+                            </div>
+                            <p class="text-sm text-stone-500 mt-1">設定真實姓名、別名與關注報表。</p>
+                        </button>
+
+                        <button onclick="playScenario('B')" class="interactive-card w-full text-left p-4 bg-stone-50 border border-stone-200 rounded-xl hover:bg-orange-50 group">
+                            <div class="flex justify-between items-center">
+                                <span class="font-bold text-stone-800 group-hover:text-orange-700">情境 B：自動提醒 (Push)</span>
+                                <span class="text-stone-400">→</span>
+                            </div>
+                            <p class="text-sm text-stone-500 mt-1">定時掃描發現未填寫，發送提醒。</p>
+                        </button>
+
+                        <button onclick="playScenario('C')" class="interactive-card w-full text-left p-4 bg-stone-50 border border-stone-200 rounded-xl hover:bg-orange-50 group">
+                            <div class="flex justify-between items-center">
+                                <span class="font-bold text-stone-800 group-hover:text-orange-700">情境 C：人工確認 (AI Learning)</span>
+                                <span class="text-stone-400">→</span>
+                            </div>
+                            <p class="text-sm text-stone-500 mt-1">AI 發現新別名，請求用戶確認。</p>
+                        </button>
+
+                         <button onclick="playScenario('D')" class="interactive-card w-full text-left p-4 bg-stone-50 border border-stone-200 rounded-xl hover:bg-orange-50 group">
+                            <div class="flex justify-between items-center">
+                                <span class="font-bold text-stone-800 group-hover:text-orange-700">情境 D：查詢與修改 (Management)</span>
+                                <span class="text-stone-400">→</span>
+                            </div>
+                            <p class="text-sm text-stone-500 mt-1">查詢設定狀態，動態增減別名。</p>
+                        </button>
+
+                        <button onclick="playScenario('E')" class="interactive-card w-full text-left p-4 bg-stone-50 border border-stone-200 rounded-xl hover:bg-orange-50 group">
+                            <div class="flex justify-between items-center">
+                                <span class="font-bold text-stone-800 group-hover:text-orange-700">情境 E：主動查詢狀態 (Pull)</span>
+                                <span class="text-stone-400">→</span>
+                            </div>
+                            <p class="text-sm text-stone-500 mt-1">用戶主動問「我填了嗎？」，系統即時檢查。</p>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Right: Phone Simulator -->
+                <div class="flex justify-center items-center">
+                    <div class="relative w-80 h-[600px] bg-stone-900 rounded-[3rem] shadow-2xl border-4 border-stone-800 overflow-hidden">
+                        <!-- Screen Header -->
+                        <div class="absolute top-0 w-full h-20 bg-slate-800 z-10 flex items-end pb-2 px-4 shadow-md">
+                            <div class="text-white font-bold">監測助理 Bot</div>
+                        </div>
+                        
+                        <!-- Chat Area -->
+                        <div id="chat-container" class="absolute top-20 bottom-16 w-full bg-[#7289da] bg-opacity-10 overflow-y-auto p-4 space-y-3 flex flex-col">
+                            <!-- Messages will be injected here -->
+                            <div class="text-center text-xs text-stone-400 mt-4">請選擇左側情境開始模擬</div>
+                        </div>
+
+                        <!-- Input Area (Visual Only) -->
+                        <div class="absolute bottom-0 w-full h-16 bg-white border-t border-stone-200 flex items-center px-4 gap-2">
+                            <div class="w-6 h-6 rounded-full bg-stone-300"></div>
+                            <div class="flex-1 h-8 bg-stone-100 rounded-full px-3 text-xs flex items-center text-stone-400">輸入訊息...</div>
+                            <div class="w-6 h-6 rounded-full bg-blue-500"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Section 3: Architecture & Workflow -->
+    <section id="architecture" class="py-16 bg-stone-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <h2 class="text-3xl font-bold text-stone-900 mb-8 text-center">系統架構與邏輯 (Workflows)</h2>
+            
+            <!-- Tabs -->
+            <div class="flex justify-center border-b border-stone-200 mb-8">
+                <button onclick="switchTab('wf-a')" id="tab-wf-a" class="tab-active px-6 py-3 text-sm font-medium transition-colors">Workflow A: 身分設定</button>
+                <button onclick="switchTab('wf-b')" id="tab-wf-b" class="tab-inactive px-6 py-3 text-sm font-medium transition-colors">Workflow B: 確認機制</button>
+                <button onclick="switchTab('wf-c')" id="tab-wf-c" class="tab-inactive px-6 py-3 text-sm font-medium transition-colors">Workflow C: 核心監測</button>
+                <button onclick="switchTab('wf-ai')" id="tab-wf-ai" class="tab-inactive px-6 py-3 text-sm font-medium transition-colors">AI 判定邏輯</button>
+            </div>
+
+            <!-- Content Area -->
+            <div class="bg-white rounded-2xl shadow-sm p-8 min-h-[400px]">
+                
+                <!-- Workflow A Content -->
+                <div id="content-wf-a" class="workflow-content block">
+                    <h3 class="text-xl font-bold mb-4 text-orange-600">即時觸發：使用者設定與意圖辨識</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <div class="bg-stone-50 p-4 rounded-lg border border-stone-200">
+                            <h4 class="font-bold text-stone-800 mb-2">1. Webhook 入口</h4>
+                            <p class="text-sm text-stone-600">接收 LINE 傳來的文字訊息。</p>
+                        </div>
+                        <div class="flex justify-center items-center text-stone-300 hidden md:flex">→</div>
+                        <div class="bg-stone-50 p-4 rounded-lg border border-stone-200">
+                            <h4 class="font-bold text-stone-800 mb-2">2. 意圖分析 (Router)</h4>
+                            <ul class="text-sm text-stone-600 space-y-2 list-disc pl-4">
+                                <li><strong>自我介紹:</strong> AI 提取 <code>Real_Name</code>, <code>Aliases</code>。</li>
+                                <li><strong>連結貼附:</strong> Regex <code>/\/spreadsheets\/d\/.../</code> 提取 ID。</li>
+                                <li><strong>查詢/修改:</strong> AI 識別 "刪除", "查詢" 關鍵字。</li>
+                            </ul>
+                        </div>
+                        <div class="flex justify-center items-center text-stone-300 hidden md:flex">→</div>
+                        <div class="bg-stone-50 p-4 rounded-lg border border-stone-200">
+                            <h4 class="font-bold text-stone-800 mb-2">3. 執行與回饋</h4>
+                            <p class="text-sm text-stone-600">
+                                寫入 <code>Master_Sync</code> 表格。<br>
+                                <strong>關鍵驗證：</strong> n8n 嘗試讀取 Sheet，若 403 Forbidden 則回傳錯誤引導。
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Workflow B Content -->
+                <div id="content-wf-b" class="workflow-content hidden">
+                    <h3 class="text-xl font-bold mb-4 text-orange-600">互動觸發：別名確認</h3>
+                    <div class="flex flex-col md:flex-row gap-4 items-center justify-center">
+                        <div class="w-full md:w-1/3 bg-stone-50 p-4 rounded-lg border border-stone-200 text-center">
+                            <div class="text-sm text-stone-500 mb-1">觸發源</div>
+                            <div class="font-bold">LINE Postback Action</div>
+                            <div class="text-xs text-stone-400 mt-1">使用者點擊【是/否】按鈕</div>
+                        </div>
+                        <div class="text-2xl text-stone-300">↓</div>
+                        <div class="w-full md:w-1/3 bg-stone-50 p-4 rounded-lg border border-stone-200 text-center">
+                            <div class="text-sm text-stone-500 mb-1">邏輯處理</div>
+                            <div class="font-bold">IF Clicked 'YES'</div>
+                            <div class="text-xs text-stone-400 mt-1">讀取 <code>Pending_Alias</code> → Append to <code>Aliases</code></div>
+                        </div>
+                        <div class="text-2xl text-stone-300">↓</div>
+                        <div class="w-full md:w-1/3 bg-stone-50 p-4 rounded-lg border border-stone-200 text-center">
+                            <div class="text-sm text-stone-500 mb-1">清理</div>
+                            <div class="font-bold">Empty Pending_Alias</div>
+                            <div class="text-xs text-stone-400 mt-1">回傳確認訊息</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Workflow C Content -->
+                <div id="content-wf-c" class="workflow-content hidden">
+                    <h3 class="text-xl font-bold mb-4 text-orange-600">核心監測：定時與主動查詢</h3>
+                    <div class="space-y-4">
+                        <div class="flex items-start gap-4">
+                            <div class="bg-orange-100 text-orange-800 font-bold px-3 py-1 rounded text-sm shrink-0">Trigger</div>
+                            <div>
+                                <h4 class="font-bold">Cron (19, 20, 21點) 或 手動調用</h4>
+                                <p class="text-sm text-stone-600">讀取 Admin 表，獲取所有使用者的 <code>Target_Sheet_IDs</code>。</p>
+                            </div>
+                        </div>
+                        <div class="flex items-start gap-4">
+                            <div class="bg-blue-100 text-blue-800 font-bold px-3 py-1 rounded text-sm shrink-0">Loop</div>
+                            <div>
+                                <h4 class="font-bold">多表循環 (Split in Batches)</h4>
+                                <p class="text-sm text-stone-600">
+                                    針對每個 Sheet ID 讀取資料。
+                                    <span class="bg-red-100 text-red-700 text-xs px-2 py-0.5 rounded ml-2">Robustness: Wait 1s & Continue on Fail</span>
+                                </p>
+                            </div>
+                        </div>
+                        <div class="flex items-start gap-4">
+                            <div class="bg-purple-100 text-purple-800 font-bold px-3 py-1 rounded text-sm shrink-0">AI Judge</div>
+                            <div>
+                                <h4 class="font-bold">模糊比對 (GPT-4o/Claude)</h4>
+                                <p class="text-sm text-stone-600">輸入：<code>System_Date</code>, <code>Aliases</code>, <code>Sheet_JSON</code>。<br>輸出：<code>{status: "missing" | "completed"}</code></p>
+                            </div>
+                        </div>
+                        <div class="flex items-start gap-4">
+                            <div class="bg-green-100 text-green-800 font-bold px-3 py-1 rounded text-sm shrink-0">Result</div>
+                            <div>
+                                <h4 class="font-bold">彙整與推播</h4>
+                                <p class="text-sm text-stone-600">將多個 Sheet 的結果合併為單一訊息。若全數完成則回傳鼓勵訊息。</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- AI Logic Content -->
+                <div id="content-wf-ai" class="workflow-content hidden">
+                    <h3 class="text-xl font-bold mb-4 text-orange-600">AI Node Prompt 設計</h3>
+                    <div class="bg-stone-900 text-stone-50 p-6 rounded-lg font-mono text-sm overflow-x-auto">
+                        <p class="text-stone-400 mb-2">// System Prompt</p>
+                        <p>你是一位精準的資料查核員。</p>
+                        <p>系統日期：<span class="text-green-400">{{$today}}</span></p>
+                        <p>使用者別名清單：<span class="text-green-400">{{$aliases}}</span></p>
+                        <p>數據來源：<span class="text-green-400">{{$sheet_data}}</span></p>
+                        <br>
+                        <p>請執行以下分析：</p>
+                        <p>1. 找出數據中所有日期語意等同於「系統日期」的行 (模糊匹配)。</p>
+                        <p>2. 檢查這些行的「姓名相關欄位」是否與「別名清單」匹配。</p>
+                        <p>3. 針對匹配成功的行，判斷其「工作/進度/簽到」欄位是否為空值或初始預設值。</p>
+                        <p>4. 輸出 JSON 格式：<span class="text-yellow-400">{"status": "missing" | "completed", "found_name": "...", "sheet_id": "..."}</span></p>
+                    </div>
+                    <div class="mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg text-sm text-yellow-800">
+                        <strong>解決痛點：</strong> 透過 AI 語意理解，解決了「日期格式不一 (2024/1/1 vs 1-1)」以及「Sheet 欄位順序變動」的問題。
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </section>
+
+    <!-- Section 4: Data Model & Robustness -->
+    <section class="py-16 bg-white border-t border-stone-200">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-12">
+                <!-- Data Model Table -->
+                <div>
+                    <h2 class="text-2xl font-bold text-stone-900 mb-6">核心資料模型 (Master_Sync)</h2>
+                    <p class="text-sm text-stone-500 mb-4">此表位於 Admin Google Sheet，作為系統的狀態資料庫。</p>
+                    <div class="overflow-x-auto bg-white border border-stone-200 rounded-xl shadow-sm">
+                        <table class="min-w-full divide-y divide-stone-200 text-sm">
+                            <thead class="bg-stone-50">
+                                <tr>
+                                    <th class="px-4 py-3 text-left font-medium text-stone-500">欄位名稱</th>
+                                    <th class="px-4 py-3 text-left font-medium text-stone-500">用途</th>
+                                    <th class="px-4 py-3 text-left font-medium text-stone-500">範例數據</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-stone-200">
+                                <tr>
+                                    <td class="px-4 py-3 font-mono text-stone-700">Line_UID</td>
+                                    <td class="px-4 py-3 text-stone-600">唯一識別</td>
+                                    <td class="px-4 py-3 text-stone-400">U8429...</td>
+                                </tr>
+                                <tr>
+                                    <td class="px-4 py-3 font-mono text-stone-700">Real_Name</td>
+                                    <td class="px-4 py-3 text-stone-600">正式姓名</td>
+                                    <td class="px-4 py-3 text-stone-800">張大明</td>
+                                </tr>
+                                <tr>
+                                    <td class="px-4 py-3 font-mono text-stone-700">Aliases</td>
+                                    <td class="px-4 py-3 text-stone-600">所有別名</td>
+                                    <td class="px-4 py-3 text-stone-800">小張, Tommy</td>
+                                </tr>
+                                <tr>
+                                    <td class="px-4 py-3 font-mono text-stone-700">Pending_Alias</td>
+                                    <td class="px-4 py-3 text-stone-600">待確認別名</td>
+                                    <td class="px-4 py-3 text-orange-600">老張</td>
+                                </tr>
+                                <tr>
+                                    <td class="px-4 py-3 font-mono text-stone-700">Target_Sheet_IDs</td>
+                                    <td class="px-4 py-3 text-stone-600">監測表單</td>
+                                    <td class="px-4 py-3 text-stone-800">ID_1, ID_2</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Robustness Cards -->
+                <div>
+                    <h2 class="text-2xl font-bold text-stone-900 mb-6">穩定性設計 (Robustness)</h2>
+                    <div class="grid grid-cols-1 gap-4">
+                        <div class="p-4 bg-stone-50 rounded-xl border border-stone-200">
+                            <h4 class="font-bold text-stone-800 flex items-center gap-2">
+                                <span class="text-orange-600">●</span> 日期格式混亂
+                            </h4>
+                            <p class="text-sm text-stone-600 mt-1">AI Node 輸入端注入 `System_Date`，要求 AI 進行語意上的日期比對，而非字串完全匹配。</p>
+                        </div>
+                        <div class="p-4 bg-stone-50 rounded-xl border border-stone-200">
+                            <h4 class="font-bold text-stone-800 flex items-center gap-2">
+                                <span class="text-orange-600">●</span> Sheet 結構變動
+                            </h4>
+                            <p class="text-sm text-stone-600 mt-1">不限制讀取 A:B 欄，而是讀取整列 JSON，由 AI 自動判斷哪個欄位是「姓名」、哪個是「填寫內容」。</p>
+                        </div>
+                        <div class="p-4 bg-stone-50 rounded-xl border border-stone-200">
+                            <h4 class="font-bold text-stone-800 flex items-center gap-2">
+                                <span class="text-orange-600">●</span> API Rate Limit
+                            </h4>
+                            <p class="text-sm text-stone-600 mt-1">使用 <code>Wait Node</code> (延遲 1 秒) 與 <code>Split In Batches</code>，並開啟 <code>Continue on Fail</code> 防止單一錯誤中斷流程。</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Section 5: Implementation Checklist -->
+    <section id="implementation" class="py-16 bg-stone-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <h2 class="text-3xl font-bold text-stone-900 mb-8 text-center">實作檢查清單 (Checklist)</h2>
+            <p class="text-center text-stone-600 mb-10 max-w-2xl mx-auto">
+                點擊下方項目可標記完成狀態，圖表將即時更新專案進度。
+            </p>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-12 items-center">
+                <!-- Checklist Items -->
+                <div class="space-y-6">
+                    <div>
+                        <h3 class="font-bold text-stone-800 mb-3 border-b border-stone-200 pb-1">Phase 1: 環境認證</h3>
+                        <div class="space-y-2">
+                            <label class="flex items-center space-x-3 cursor-pointer">
+                                <input type="checkbox" class="task-checkbox form-checkbox h-5 w-5 text-orange-600 rounded focus:ring-orange-500" onchange="updateChart()">
+                                <span class="text-stone-700">Google Cloud Console 啟用 Sheets & Drive API</span>
+                            </label>
+                            <label class="flex items-center space-x-3 cursor-pointer">
+                                <input type="checkbox" class="task-checkbox form-checkbox h-5 w-5 text-orange-600 rounded focus:ring-orange-500" onchange="updateChart()">
+                                <span class="text-stone-700">建立 OAuth 2.0 Client ID 並連線 n8n</span>
+                            </label>
+                            <label class="flex items-center space-x-3 cursor-pointer">
+                                <input type="checkbox" class="task-checkbox form-checkbox h-5 w-5 text-orange-600 rounded focus:ring-orange-500" onchange="updateChart()">
+                                <span class="text-stone-700">建立 LINE Channel 取得 Token/Secret</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div>
+                        <h3 class="font-bold text-stone-800 mb-3 border-b border-stone-200 pb-1">Phase 2: 資料與 AI</h3>
+                        <div class="space-y-2">
+                            <label class="flex items-center space-x-3 cursor-pointer">
+                                <input type="checkbox" class="task-checkbox form-checkbox h-5 w-5 text-orange-600 rounded focus:ring-orange-500" onchange="updateChart()">
+                                <span class="text-stone-700">建立 Master_Sync 表與測試數據</span>
+                            </label>
+                            <label class="flex items-center space-x-3 cursor-pointer">
+                                <input type="checkbox" class="task-checkbox form-checkbox h-5 w-5 text-orange-600 rounded focus:ring-orange-500" onchange="updateChart()">
+                                <span class="text-stone-700">AI Prompt 測試 (別名與意圖)</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div>
+                        <h3 class="font-bold text-stone-800 mb-3 border-b border-stone-200 pb-1">Phase 3: 流程串接</h3>
+                        <div class="space-y-2">
+                            <label class="flex items-center space-x-3 cursor-pointer">
+                                <input type="checkbox" class="task-checkbox form-checkbox h-5 w-5 text-orange-600 rounded focus:ring-orange-500" onchange="updateChart()">
+                                <span class="text-stone-700">實作 Regex 與多連結處理</span>
+                            </label>
+                            <label class="flex items-center space-x-3 cursor-pointer">
+                                <input type="checkbox" class="task-checkbox form-checkbox h-5 w-5 text-orange-600 rounded focus:ring-orange-500" onchange="updateChart()">
+                                <span class="text-stone-700">實作 Workflow C 彙整邏輯</span>
+                            </label>
+                            <label class="flex items-center space-x-3 cursor-pointer">
+                                <input type="checkbox" class="task-checkbox form-checkbox h-5 w-5 text-orange-600 rounded focus:ring-orange-500" onchange="updateChart()">
+                                <span class="text-stone-700">測試人工確認按鈕機制</span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Chart -->
+                <div class="flex flex-col items-center">
+                    <div class="chart-container">
+                        <canvas id="progressChart"></canvas>
+                    </div>
+                    <p id="progressText" class="mt-4 text-xl font-bold text-stone-700">完成度: 0%</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="bg-stone-900 text-stone-400 py-8">
+        <div class="max-w-7xl mx-auto px-4 text-center">
+            <p>© 2026 LINE x n8n Project Plan Interactive Report.</p>
+        </div>
+    </footer>
+
+    <!-- JavaScript Logic -->
+    <script>
+        // --- State Management ---
+        const state = {
+            currentScenario: null,
+            checklistTotal: 0,
+            checklistCompleted: 0
+        };
+
+        // --- Chat Simulator Logic ---
+        const scenarios = {
+            'A': [
+                { sender: 'bot', text: '歡迎使用監測助理！請告訴我您的真實姓名，以及大家在報表上可能會怎麼稱呼您？' },
+                { sender: 'user', text: '我是張大明，報表上可能會寫大明、小張，或是 Tommy。' },
+                { sender: 'system', text: 'AI 提取: Name="張大明", Aliases=["大明", "小張", "Tommy"]' },
+                { sender: 'bot', text: '已為您設定好身分！未來我會監測這四個名字，對嗎？', type: 'confirm' },
+                { sender: 'user', text: '是 (按鈕點擊)' },
+                { sender: 'bot', text: '請貼上您需要我幫忙監測的 Google Sheet 完整網址（可一次貼多個）。' },
+                { sender: 'user', text: 'https://docs.google.com/spreadsheets/d/abc12345\nhttps://docs.google.com/spreadsheets/d/xyz98765' },
+                { sender: 'system', text: 'n8n: 驗證權限... ID_1 OK, ID_2 OK' },
+                { sender: 'bot', text: '設定完成！連結 A 與 B 已納入您的每日監測清單。' }
+            ],
+            'B': [
+                { sender: 'system', text: 'Cron Trigger: 20:00' },
+                { sender: 'system', text: 'Workflow C: 掃描 Sheet A... 發現 "小張" 未填寫' },
+                { sender: 'bot', text: '張大明您好，今日在『報表 A』尚未填寫，請點擊連結補齊：[連結]' }
+            ],
+            'C': [
+                { sender: 'system', text: 'Workflow C: 掃描 Sheet C... 發現未填寫姓名 "老張"' },
+                { sender: 'system', text: 'AI Judge: "老張" 類似 "張大明" 但不在清單中' },
+                { sender: 'bot', text: '張大明您好，我在報表 C 發現『老張』尚未填寫，請問『老張』是您的別名嗎？', type: 'confirm' },
+                { sender: 'user', text: '是 (按鈕點擊)' },
+                { sender: 'system', text: 'Update: Append "老張" to Aliases' },
+                { sender: 'bot', text: '好的，已紀錄！下次我也會幫您注意這個名字。' }
+            ],
+            'D': [
+                { sender: 'user', text: '我的設定' },
+                { sender: 'bot', text: '姓名: 張大明\n別名: 小張, Tommy\n關注報表: 報表A, 報表B' },
+                { sender: 'user', text: '增加別名：大強' },
+                { sender: 'system', text: 'AI Intent: Add Alias "大強"' },
+                { sender: 'bot', text: '已新增別名「大強」。' }
+            ],
+            'E': [
+                { sender: 'user', text: '幫我檢查進度' },
+                { sender: 'system', text: 'Trigger Workflow C (Active Mode)' },
+                { sender: 'system', text: 'Scanning...' },
+                { sender: 'bot', text: '太棒了！您目前的報表皆已完成。' }
+            ]
+        };
+
+        function playScenario(scenarioId) {
+            const chatContainer = document.getElementById('chat-container');
+            chatContainer.innerHTML = ''; // Clear chat
+            state.currentScenario = scenarioId;
+
+            const messages = scenarios[scenarioId];
+            let delay = 0;
+
+            messages.forEach((msg, index) => {
+                setTimeout(() => {
+                    const msgDiv = document.createElement('div');
+                    msgDiv.className = `max-w-[85%] p-3 rounded-lg text-sm message-anim ${
+                        msg.sender === 'user' 
+                            ? 'bg-blue-500 text-white self-end rounded-br-none ml-auto' 
+                            : msg.sender === 'system'
+                                ? 'bg-stone-600 text-stone-200 self-center text-xs font-mono border border-stone-500'
+                                : 'bg-white text-stone-800 self-start rounded-bl-none shadow-sm border border-stone-200'
+                    }`;
+                    
+                    if (msg.sender === 'system') {
+                        msgDiv.innerText = `[系統] ${msg.text}`;
+                    } else {
+                        msgDiv.innerText = msg.text;
+                    }
+
+                    if (msg.type === 'confirm') {
+                        const btnDiv = document.createElement('div');
+                        btnDiv.className = 'flex gap-2 mt-2';
+                        btnDiv.innerHTML = `
+                            <button class="bg-blue-100 text-blue-600 px-3 py-1 rounded text-xs hover:bg-blue-200">是</button>
+                            <button class="bg-stone-100 text-stone-600 px-3 py-1 rounded text-xs hover:bg-stone-200">否</button>
+                        `;
+                        msgDiv.appendChild(btnDiv);
+                    }
+
+                    chatContainer.appendChild(msgDiv);
+                    chatContainer.scrollTop = chatContainer.scrollHeight;
+                }, delay);
+
+                delay += 1000; // 1 second delay between messages
+            });
+        }
+
+        // --- Tab Logic ---
+        function switchTab(tabId) {
+            // Hide all content
+            document.querySelectorAll('.workflow-content').forEach(el => el.classList.add('hidden'));
+            document.getElementById(`content-${tabId}`).classList.remove('hidden');
+
+            // Update tab styles
+            document.querySelectorAll('button[id^="tab-"]').forEach(btn => {
+                btn.classList.remove('tab-active');
+                btn.classList.add('tab-inactive');
+            });
+            const activeBtn = document.getElementById(`tab-${tabId}`);
+            activeBtn.classList.remove('tab-inactive');
+            activeBtn.classList.add('tab-active');
+        }
+
+        // --- Chart.js: Implementation Tracker ---
+        let progressChart;
+
+        function initChart() {
+            const ctx = document.getElementById('progressChart').getContext('2d');
+            
+            // Calculate initial counts
+            const checkboxes = document.querySelectorAll('.task-checkbox');
+            state.checklistTotal = checkboxes.length;
+            
+            progressChart = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['已完成', '待辦'],
+                    datasets: [{
+                        data: [0, state.checklistTotal],
+                        backgroundColor: [
+                            '#ea580c', // Orange-600
+                            '#e7e5e4'  // Stone-200
+                        ],
+                        borderWidth: 0,
+                        hoverOffset: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: {
+                                font: {
+                                    family: "'Noto Sans TC', sans-serif"
+                                }
+                            }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return context.label + ': ' + context.raw + ' 項';
+                                }
+                            }
+                        }
+                    },
+                    cutout: '70%'
+                }
+            });
+        }
+
+        function updateChart() {
+            const checkboxes = document.querySelectorAll('.task-checkbox');
+            const completed = Array.from(checkboxes).filter(cb => cb.checked).length;
+            const remaining = state.checklistTotal - completed;
+
+            // Update state
+            state.checklistCompleted = completed;
+
+            // Update Chart Data
+            progressChart.data.datasets[0].data = [completed, remaining];
+            progressChart.update();
+
+            // Update Text
+            const percentage = Math.round((completed / state.checklistTotal) * 100);
+            document.getElementById('progressText').innerText = `完成度: ${percentage}%`;
+        }
+
+        // --- Initialization ---
+        document.addEventListener('DOMContentLoaded', () => {
+            initChart();
+            // Start with a demo message in simulator
+            setTimeout(() => {
+                const chatContainer = document.getElementById('chat-container');
+                const msgDiv = document.createElement('div');
+                msgDiv.className = 'bg-white text-stone-800 self-start rounded-bl-none shadow-sm border border-stone-200 max-w-[85%] p-3 rounded-lg text-sm message-anim';
+                msgDiv.innerText = '點擊左側情境按鈕開始模擬...';
+                chatContainer.appendChild(msgDiv);
+            }, 500);
+        });
+
+    </script>
+</body>
+</html>

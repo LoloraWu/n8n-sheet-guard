@@ -1,0 +1,166 @@
+{
+  "name": "Workflow B - Report Status API",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "api/report/status",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              { "name": "Access-Control-Allow-Origin", "value": "*" },
+              { "name": "Access-Control-Allow-Methods", "value": "GET, OPTIONS" },
+              { "name": "Access-Control-Allow-Headers", "value": "Content-Type" }
+            ]
+          }
+        }
+      },
+      "id": "webhook-status",
+      "name": "Webhook Report Status",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "mode": "id", "value": "={{ $env.MASTER_SYNC_SHEET_ID }}" },
+        "sheetName": { "__rl": true, "mode": "name", "value": "Master_Sync" },
+        "filters": {
+          "conditions": [
+            { "lookupColumn": "Line_UID", "lookupValue": "={{ $json.query.userId }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "sheets-get-user",
+      "name": "Get User Config",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [450, 300],
+      "credentials": { "googleSheetsOAuth2Api": { "id": "google-sheets-cred", "name": "Google Sheets" } }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "check-user",
+              "leftValue": "={{ $json.Line_UID }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "notEmpty" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "if-user-exists",
+      "name": "User Exists?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const user = $input.first().json;\nconst sheetIds = user.Target_Sheet_IDs ? user.Target_Sheet_IDs.split(',').map(s => s.trim()) : [];\nconst configs = user.Sheet_Configs ? JSON.parse(user.Sheet_Configs) : {};\nconst aliases = user.Aliases ? user.Aliases.split(',').map(s => s.trim()) : [];\n\nreturn sheetIds.map(sheetId => ({\n  json: {\n    sheetId,\n    config: configs[sheetId] || null,\n    aliases,\n    realName: user.Real_Name\n  }\n}));"
+      },
+      "id": "code-split-sheets",
+      "name": "Split Sheet IDs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "mode": "id", "value": "={{ $json.sheetId }}" },
+        "sheetName": { "__rl": true, "mode": "name", "value": "={{ $json.config?.sheet_name || 'Sheet1' }}" },
+        "options": { "range": "A1:Z100" }
+      },
+      "id": "sheets-read-target",
+      "name": "Read Target Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1050, 300],
+      "credentials": { "googleSheetsOAuth2Api": { "id": "google-sheets-cred", "name": "Google Sheets" } },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o-mini",
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "你是一位精準的資料查核員。分析 Google Sheet 數據，判斷使用者今日是否已填寫。\n\n未填寫定義：空白、NA、N/A、n/a、待填、待填寫、-、-- 或純空格\n\n回應必須是純 JSON 格式，不要有任何其他文字。"
+            },
+            {
+              "role": "user",
+              "content": "系統日期：{{ $now.format('YYYY-MM-DD') }}\n使用者別名清單：{{ $json.aliases }}\n欄位配置：姓名欄={{ $json.config?.name_column || '自動辨識' }}，日期欄={{ $json.config?.date_column || '自動辨識' }}，進度欄={{ $json.config?.progress_column || '自動辨識' }}\n\n數據來源：\n{{ JSON.stringify($node['Read Target Sheet'].json) }}\n\n請執行以下分析：\n1. 找出數據中所有日期語意等同於「系統日期」的行\n2. 檢查這些行的「姓名欄」是否與「別名清單」匹配\n3. 針對匹配成功的行，判斷「進度欄」是否為未填寫狀態\n\n輸出 JSON 格式：\n{\n  \"status\": \"missing\" | \"completed\" | \"not_found\",\n  \"found_name\": \"匹配到的姓名或null\",\n  \"progress_value\": \"進度欄的實際內容或null\",\n  \"row_number\": 數字或null,\n  \"reason\": \"判斷理由\"\n}"
+            }
+          ]
+        },
+        "options": { "temperature": 0.1 }
+      },
+      "id": "ai-check-status",
+      "name": "AI Check Status",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [1250, 300],
+      "credentials": { "openAiApi": { "id": "openai-cred", "name": "OpenAI" } }
+    },
+    {
+      "parameters": {
+        "jsCode": "const results = $input.all();\nconst reports = [];\n\nfor (const item of results) {\n  try {\n    const aiResponse = item.json.message?.content || item.json.text || '{}';\n    const parsed = JSON.parse(aiResponse.replace(/```json\\n?|```/g, '').trim());\n    reports.push({\n      sheetId: item.json.sheetId || 'unknown',\n      sheetName: item.json.config?.sheet_name || 'Unknown',\n      status: parsed.status || 'error',\n      foundName: parsed.found_name,\n      progressValue: parsed.progress_value,\n      rowNumber: parsed.row_number,\n      reason: parsed.reason\n    });\n  } catch (e) {\n    reports.push({\n      sheetId: item.json.sheetId || 'unknown',\n      sheetName: item.json.config?.sheet_name || 'Unknown',\n      status: 'error',\n      error: e.message\n    });\n  }\n}\n\nconst missingCount = reports.filter(r => r.status === 'missing').length;\nconst completedCount = reports.filter(r => r.status === 'completed').length;\n\nreturn [{\n  json: {\n    success: true,\n    data: {\n      summary: {\n        total: reports.length,\n        missing: missingCount,\n        completed: completedCount,\n        allCompleted: missingCount === 0\n      },\n      reports\n    },\n    error: null\n  }\n}];"
+      },
+      "id": "code-aggregate",
+      "name": "Aggregate Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1450, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}"
+      },
+      "id": "respond-status",
+      "name": "Respond Status",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1650, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: false, data: null, error: '使用者不存在' }) }}",
+        "options": { "responseCode": 404 }
+      },
+      "id": "respond-not-found",
+      "name": "Respond Not Found",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [850, 450]
+    }
+  ],
+  "connections": {
+    "Webhook Report Status": { "main": [[{ "node": "Get User Config", "type": "main", "index": 0 }]] },
+    "Get User Config": { "main": [[{ "node": "User Exists?", "type": "main", "index": 0 }]] },
+    "User Exists?": {
+      "main": [
+        [{ "node": "Split Sheet IDs", "type": "main", "index": 0 }],
+        [{ "node": "Respond Not Found", "type": "main", "index": 0 }]
+      ]
+    },
+    "Split Sheet IDs": { "main": [[{ "node": "Read Target Sheet", "type": "main", "index": 0 }]] },
+    "Read Target Sheet": { "main": [[{ "node": "AI Check Status", "type": "main", "index": 0 }]] },
+    "AI Check Status": { "main": [[{ "node": "Aggregate Results", "type": "main", "index": 0 }]] },
+    "Aggregate Results": { "main": [[{ "node": "Respond Status", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 1,
+  "pinData": {}
+}

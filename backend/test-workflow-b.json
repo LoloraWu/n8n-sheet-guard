@@ -1,0 +1,137 @@
+{
+  "name": "[TEST] Workflow B - Report Status API",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "manual-trigger",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 模擬查詢報表狀態的請求\n// 請修改 userId 為實際存在於 Master_Sync 的使用者\nreturn [{\n  json: {\n    query: {\n      userId: 'U_TEST_USER_001'\n    }\n  }\n}];"
+      },
+      "id": "mock-data",
+      "name": "Mock Request Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "mode": "id", "value": "={{ $env.MASTER_SYNC_SHEET_ID }}" },
+        "sheetName": { "__rl": true, "mode": "name", "value": "Master_Sync" },
+        "filters": {
+          "conditions": [
+            { "lookupColumn": "Line_UID", "lookupValue": "={{ $json.query.userId }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "sheets-get-user",
+      "name": "Get User Config",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [650, 300],
+      "credentials": { "googleSheetsOAuth2Api": { "id": "google-sheets-cred", "name": "Google Sheets" } }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "check-user",
+              "leftValue": "={{ $json.Line_UID }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "notEmpty" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "if-user-exists",
+      "name": "User Exists?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const user = $input.first().json;\nconst sheetIds = user.Target_Sheet_IDs ? user.Target_Sheet_IDs.split(',').map(s => s.trim()).filter(s => s) : [];\nconst configs = user.Sheet_Configs ? JSON.parse(user.Sheet_Configs) : {};\nconst aliases = user.Aliases ? user.Aliases.split(',').map(s => s.trim()) : [];\n\nif (sheetIds.length === 0) {\n  return [{\n    json: {\n      success: true,\n      data: {\n        summary: { total: 0, missing: 0, completed: 0, allCompleted: true },\n        reports: [],\n        message: '尚未設定任何關注報表'\n      },\n      error: null\n    }\n  }];\n}\n\nreturn sheetIds.map(sheetId => ({\n  json: {\n    sheetId,\n    config: configs[sheetId] || null,\n    aliases,\n    realName: user.Real_Name\n  }\n}));"
+      },
+      "id": "code-split-sheets",
+      "name": "Split Sheet IDs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1050, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "mode": "id", "value": "={{ $json.sheetId }}" },
+        "sheetName": { "__rl": true, "mode": "name", "value": "={{ $json.config?.sheet_name || 'Sheet1' }}" },
+        "options": { "range": "A1:Z50" }
+      },
+      "id": "sheets-read-target",
+      "name": "Read Target Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1250, 300],
+      "credentials": { "googleSheetsOAuth2Api": { "id": "google-sheets-cred", "name": "Google Sheets" } },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// 簡化版狀態判定（不使用 AI）\n// 實際使用時可替換為 AI Node\n\nconst item = $input.first().json;\nconst sheetData = $node['Read Target Sheet'].json;\nconst config = item.config;\nconst aliases = item.aliases || [];\nconst today = new Date().toISOString().split('T')[0];\n\n// 模擬判定結果\nlet status = 'completed';\nlet foundName = null;\nlet progressValue = null;\n\n// 檢查是否有錯誤\nif (sheetData.error) {\n  status = 'error';\n} else {\n  // 這裡可以加入實際的判定邏輯\n  // 目前返回模擬結果\n  status = Math.random() > 0.5 ? 'completed' : 'missing';\n  foundName = aliases[0] || '未知';\n  progressValue = status === 'completed' ? '已完成' : '';\n}\n\nreturn [{\n  json: {\n    sheetId: item.sheetId,\n    sheetName: config?.sheet_name || 'Unknown',\n    status,\n    foundName,\n    progressValue,\n    config\n  }\n}];"
+      },
+      "id": "code-check-status",
+      "name": "Check Status (Mock)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1450, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const results = $input.all();\nconst reports = results.map(r => r.json);\n\nconst missingCount = reports.filter(r => r.status === 'missing').length;\nconst completedCount = reports.filter(r => r.status === 'completed').length;\n\nreturn [{\n  json: {\n    success: true,\n    data: {\n      summary: {\n        total: reports.length,\n        missing: missingCount,\n        completed: completedCount,\n        allCompleted: missingCount === 0\n      },\n      reports\n    },\n    error: null\n  }\n}];"
+      },
+      "id": "code-aggregate",
+      "name": "Aggregate Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1650, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{\n  json: {\n    success: false,\n    data: null,\n    error: '使用者不存在'\n  }\n}];"
+      },
+      "id": "not-found",
+      "name": "User Not Found",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1050, 450]
+    }
+  ],
+  "connections": {
+    "Manual Trigger": { "main": [[{ "node": "Mock Request Data", "type": "main", "index": 0 }]] },
+    "Mock Request Data": { "main": [[{ "node": "Get User Config", "type": "main", "index": 0 }]] },
+    "Get User Config": { "main": [[{ "node": "User Exists?", "type": "main", "index": 0 }]] },
+    "User Exists?": {
+      "main": [
+        [{ "node": "Split Sheet IDs", "type": "main", "index": 0 }],
+        [{ "node": "User Not Found", "type": "main", "index": 0 }]
+      ]
+    },
+    "Split Sheet IDs": { "main": [[{ "node": "Read Target Sheet", "type": "main", "index": 0 }]] },
+    "Read Target Sheet": { "main": [[{ "node": "Check Status (Mock)", "type": "main", "index": 0 }]] },
+    "Check Status (Mock)": { "main": [[{ "node": "Aggregate Results", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "staticData": null,
+  "tags": [{ "name": "test" }],
+  "triggerCount": 1,
+  "pinData": {}
+}

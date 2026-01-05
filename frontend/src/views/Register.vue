@@ -117,7 +117,9 @@ const onSubmit = async () => {
         </van-cell-group>
         
         <!-- Section 2: Aliases -->
-        <h2 class="text-sm font-bold text-gray-500 mb-2 px-2">身分別名 (用於識別報表中的名字)</h2>
+        <h2 class="text-sm font-bold text-gray-500 mb-2 px-2">
+          身分別名 <span class="text-xs font-normal text-gray-400">(用於識別報表中的名字)</span>
+        </h2>
         <van-cell-group inset class="mb-4">
           <div class="p-3 bg-white">
              <div class="flex flex-wrap mb-3" style="gap: 32px !important;">
@@ -152,7 +154,7 @@ const onSubmit = async () => {
         <van-cell-group inset class="mb-4">
              <van-cell v-for="(sheet, index) in form.sheetUrls" :key="index" center>
                  <template #title>
-                     <div class="font-bold text-lg mb-1" style="color: rgb(37, 99, 235) !important;">{{ sheet.name }}</div>
+                     <div class="font-bold text-base mb-1" style="color: rgb(37, 99, 235) !important;">{{ sheet.name }}</div>
                      <div class="text-xs text-gray-500 truncate">{{ sheet.url }}</div>
                  </template>
                  <template #right-icon>

@@ -1,6 +1,6 @@
-<script setup>
 import { ref, reactive, onMounted } from 'vue';
 import { showToast } from 'vant';
+import liff from '@line/liff';
 
 // State
 const form = reactive({
@@ -14,6 +14,28 @@ const newSheetName = ref('');
 const newSheetUrl = ref('');
 
 const isLoading = ref(false);
+
+onMounted(async () => {
+  try {
+    // App.vue ensures LIFF is initialized before mounting this view
+    if (liff.isLoggedIn()) {
+      const profile = await liff.getProfile();
+      if (profile.displayName) {
+        // Auto-fill Real Name if empty (optional, but helpful)
+        if (!form.realName) {
+           form.realName = profile.displayName; 
+        }
+        
+        // Auto-add default alias
+        if (!form.aliases.includes(profile.displayName)) {
+          form.aliases.push(profile.displayName);
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Error fetching LIFF profile:', err);
+  }
+});
 
 // Methods
 const addAlias = () => {

@@ -1,3 +1,4 @@
+<script setup>
 import { ref, reactive, onMounted } from 'vue';
 import { showToast } from 'vant';
 import liff from '@line/liff';

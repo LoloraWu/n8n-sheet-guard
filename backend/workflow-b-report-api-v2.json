@@ -1,0 +1,407 @@
+{
+  "name": "Workflow B - Report Status API (v2 - Full Tab Scan)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "report-status",
+        "responseMode": "responseNode",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              { "name": "Access-Control-Allow-Origin", "value": "*" },
+              { "name": "Access-Control-Allow-Methods", "value": "GET, OPTIONS" },
+              { "name": "Access-Control-Allow-Headers", "value": "Content-Type" }
+            ]
+          }
+        }
+      },
+      "id": "webhook-status",
+      "name": "Webhook Report Status",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "mode": "id", "value": "={{ $env.MASTER_SYNC_SHEET_ID }}" },
+        "sheetName": { "__rl": true, "mode": "name", "value": "Master_Sync" },
+        "filters": {
+          "conditions": [
+            { "lookupColumn": "Line_UID", "lookupValue": "={{ $json.query.userId }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "sheets-get-user",
+      "name": "Get User Config",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [450, 300],
+      "credentials": { "googleSheetsOAuth2Api": { "id": "n8n-sheet-guard-master", "name": "n8n-sheet-guard-master" } }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "check-user",
+              "leftValue": "={{ $json.Line_UID }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "notEmpty" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "if-user-exists",
+      "name": "User Exists?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 解析使用者資料，準備掃描所有 spreadsheet\nconst user = $input.first().json;\n\nconst spreadsheetIds = user.Target_Sheet_IDs \n  ? user.Target_Sheet_IDs.split(',').map(s => s.trim()).filter(Boolean)\n  : [];\n\nconst aliases = user.Aliases \n  ? user.Aliases.split(',').map(s => s.trim()).filter(Boolean)\n  : [];\n\n// 解析 Sheet_Urls_JSON（包含 name 等資訊）\nlet sheetUrlsMap = {};\ntry {\n  if (user.Sheet_Urls_JSON) {\n    const parsed = JSON.parse(user.Sheet_Urls_JSON);\n    for (const s of parsed) {\n      sheetUrlsMap[s.spreadsheetId] = s;\n    }\n  }\n} catch (e) {}\n\n// 解析 schema 快取\nlet schemaCache = {};\ntry {\n  if (user.Sheet_Configs) {\n    schemaCache = JSON.parse(user.Sheet_Configs);\n  }\n} catch (e) {}\n\nreturn spreadsheetIds.map(spreadsheetId => ({\n  json: {\n    spreadsheetId,\n    sheetInfo: sheetUrlsMap[spreadsheetId] || { name: '未命名報表' },\n    aliases,\n    realName: user.Real_Name,\n    schemaCache,\n    userId: user.Line_UID\n  }\n}));"
+      },
+      "id": "code-prepare-scan",
+      "name": "Prepare Spreadsheet Scan",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://sheets.googleapis.com/v4/spreadsheets/{{ $json.spreadsheetId }}",
+        "authentication": "oAuth2",
+        "options": {
+          "response": { "response": { "fullResponse": true } }
+        }
+      },
+      "id": "http-get-spreadsheet-metadata",
+      "name": "Get Spreadsheet Metadata",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1050, 300],
+      "credentials": { "googleSheetsOAuth2Api": { "id": "n8n-sheet-guard-master", "name": "n8n-sheet-guard-master" } },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// 從 spreadsheet metadata 提取所有 tab 資訊\nconst item = $input.first().json;\nconst prevData = $('Prepare Spreadsheet Scan').first().json;\n\n// 處理 API 錯誤\nif (item.error || !item.body || !item.body.sheets) {\n  return [{\n    json: {\n      error: true,\n      errorMessage: `無法讀取 Spreadsheet: ${item.error?.message || '未知錯誤'}`,\n      spreadsheetId: prevData.spreadsheetId,\n      sheetInfo: prevData.sheetInfo\n    }\n  }];\n}\n\nconst spreadsheetTitle = item.body.properties?.title || '未命名報表';\nconst sheets = item.body.sheets || [];\n\n// 過濾掉隱藏的 tab 和 Master_Sync\nconst visibleTabs = sheets.filter(sheet => {\n  const props = sheet.properties || {};\n  const title = props.title || '';\n  \n  // 排除隱藏的 tab\n  if (props.hidden) return false;\n  \n  // 排除名為 Master_Sync 的 tab\n  if (title === 'Master_Sync') return false;\n  \n  return true;\n});\n\n// 為每個 tab 建立一個輸出項目\nreturn visibleTabs.map(sheet => {\n  const props = sheet.properties || {};\n  const tabSheetId = props.sheetId;\n  const tabName = props.title || 'Sheet1';\n  const rowCount = props.gridProperties?.rowCount || 1000;\n  const colCount = props.gridProperties?.columnCount || 26;\n  \n  // 計算 cell 數量，判斷是否需要降級讀取\n  const cellCount = rowCount * colCount;\n  const needsDegradedRead = cellCount > 50000;\n  \n  // 建立快取 key\n  const cacheKey = `${prevData.spreadsheetId}::${tabName}`;\n  const cachedSchema = prevData.schemaCache[cacheKey] || null;\n  \n  return {\n    json: {\n      spreadsheetId: prevData.spreadsheetId,\n      spreadsheetTitle: spreadsheetTitle,\n      spreadsheetUrl: `https://docs.google.com/spreadsheets/d/${prevData.spreadsheetId}`,\n      tabSheetId,\n      tabName,\n      tabUrl: `https://docs.google.com/spreadsheets/d/${prevData.spreadsheetId}/edit#gid=${tabSheetId}`,\n      rowCount,\n      colCount,\n      cellCount,\n      needsDegradedRead,\n      cacheKey,\n      cachedSchema,\n      aliases: prevData.aliases,\n      realName: prevData.realName,\n      userId: prevData.userId,\n      sheetInfo: prevData.sheetInfo\n    }\n  };\n});"
+      },
+      "id": "code-extract-tabs",
+      "name": "Extract Tabs from Metadata",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1250, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://sheets.googleapis.com/v4/spreadsheets/{{ $json.spreadsheetId }}/values/{{ encodeURIComponent($json.tabName) }}!A1:AZ{{ $json.needsDegradedRead ? '10' : Math.min($json.rowCount, 500) }}",
+        "authentication": "oAuth2",
+        "options": {
+          "response": { "response": { "fullResponse": true } }
+        }
+      },
+      "id": "http-read-tab-data",
+      "name": "Read Tab Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1450, 300],
+      "credentials": { "googleSheetsOAuth2Api": { "id": "n8n-sheet-guard-master", "name": "n8n-sheet-guard-master" } },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// 如果需要降級讀取，額外讀取最後 200 列\nconst item = $input.first().json;\nconst prevData = $('Extract Tabs from Metadata').first().json;\n\nif (!prevData.needsDegradedRead) {\n  // 不需要降級，直接傳遞資料\n  return [{\n    json: {\n      ...prevData,\n      tabData: item.body?.values || [],\n      degradedRead: false,\n      warning: null\n    }\n  }];\n}\n\n// 需要降級讀取：合併表頭資料 + 標記需要讀取尾端\nreturn [{\n  json: {\n    ...prevData,\n    headerData: item.body?.values || [],\n    degradedRead: true,\n    needsTailRead: true\n  }\n}];"
+      },
+      "id": "code-check-degraded",
+      "name": "Check Degraded Read",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1650, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "check-tail",
+              "leftValue": "={{ $json.needsTailRead }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "if-needs-tail",
+      "name": "Needs Tail Read?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1850, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://sheets.googleapis.com/v4/spreadsheets/{{ $json.spreadsheetId }}/values/{{ encodeURIComponent($json.tabName) }}!A{{ Math.max(1, $json.rowCount - 200) }}:AZ{{ $json.rowCount }}",
+        "authentication": "oAuth2",
+        "options": {
+          "response": { "response": { "fullResponse": true } }
+        }
+      },
+      "id": "http-read-tail",
+      "name": "Read Tail Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2050, 200],
+      "credentials": { "googleSheetsOAuth2Api": { "id": "n8n-sheet-guard-master", "name": "n8n-sheet-guard-master" } },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// 合併表頭 + 尾端資料\nconst tailData = $input.first().json;\nconst prevData = $('Check Degraded Read').first().json;\n\nconst headerRows = prevData.headerData || [];\nconst tailRows = tailData.body?.values || [];\n\n// 合併：表頭前 10 列 + 尾端 200 列\nconst combinedData = [...headerRows, ...tailRows];\n\nreturn [{\n  json: {\n    ...prevData,\n    tabData: combinedData,\n    warning: `此分頁資料量超過 50,000 筆（約 ${Math.round(prevData.cellCount / 1000)}k cells），已改用「表頭+尾端」抽樣掃描，可能漏掉較早的今日資料。`\n  }\n}];"
+      },
+      "id": "code-merge-tail",
+      "name": "Merge Header + Tail",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2250, 200]
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineAll",
+        "options": {}
+      },
+      "id": "merge-data-paths",
+      "name": "Merge Data Paths",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [2450, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 計算表頭 fingerprint，判斷是否需要重新做 schema inference\nconst item = $input.first().json;\n\nconst tabData = item.tabData || [];\nif (tabData.length === 0) {\n  return [{\n    json: {\n      ...item,\n      needsSchemaInference: false,\n      skipReason: 'Tab 資料為空',\n      headerFingerprint: null\n    }\n  }];\n}\n\n// 取第一列作為表頭\nconst headerRow = tabData[0] || [];\n\n// 計算 fingerprint：欄數 + 前 10 個欄位名稱的 hash\nconst headerStr = headerRow.slice(0, 10).join('|');\nconst fingerprint = `hdr:v1:cols=${headerRow.length}:${headerStr}`;\n\n// 檢查快取\nconst cachedSchema = item.cachedSchema;\nconst needsSchemaInference = !cachedSchema || cachedSchema.headerFingerprint !== fingerprint;\n\nreturn [{\n  json: {\n    ...item,\n    headerRow,\n    headerFingerprint: fingerprint,\n    needsSchemaInference,\n    existingSchema: cachedSchema\n  }\n}];"
+      },
+      "id": "code-calc-fingerprint",
+      "name": "Calculate Header Fingerprint",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2650, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "check-schema",
+              "leftValue": "={{ $json.needsSchemaInference }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "if-needs-schema",
+      "name": "Needs Schema Inference?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2850, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={{ $env.GEMINI_API_KEY }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"contents\": [{\n    \"parts\": [{\n      \"text\": \"你是一位專業的 Google Sheet 結構分析師。分析表頭欄位，推斷每個欄位的語意用途。\\n\\n欄位分類：\\n- date: 日期欄（日期、Date、時間）\\n- name: 姓名欄（姓名、Name、負責人、LINE_ID、成員）\\n- category: 分類欄（分類、類別、Category）\\n- checkableHigh: 必填欄位，空白=未填寫（進度、狀態、留言、連結、完成、回報、內容）\\n- checkableAdvisory: 選填欄位，空白只提醒（備註、Note、補充）\\n- ignore: 忽略（序號、編號、ID、#）\\n\\n輸出純 JSON，格式：\\n{\\\"columns\\\":[{\\\"col\\\":\\\"A\\\",\\\"header\\\":\\\"日期\\\",\\\"semantic\\\":\\\"date\\\"},{\\\"col\\\":\\\"B\\\",\\\"header\\\":\\\"姓名\\\",\\\"semantic\\\":\\\"name\\\"}],\\\"summary\\\":{\\\"dateCol\\\":\\\"A\\\",\\\"nameCol\\\":\\\"B\\\",\\\"checkableHighCols\\\":[\\\"C\\\",\\\"D\\\"],\\\"checkableAdvisoryCols\\\":[\\\"E\\\"]}}\\n\\nTab: {{ $json.tabName }}\\n表頭: {{ JSON.stringify($json.headerRow) }}\\n\\n請分析並輸出 JSON。\"\n    }]\n  }],\n  \"generationConfig\": {\n    \"temperature\": 0.1,\n    \"maxOutputTokens\": 1000\n  }\n}",
+        "options": {}
+      },
+      "id": "gemini-schema-inference",
+      "name": "Gemini Schema Inference",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3050, 200],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// 解析 Gemini schema inference 結果\nconst geminiResult = $input.first().json;\nconst prevData = $('Calculate Header Fingerprint').first().json;\n\nlet schema = null;\ntry {\n  // Gemini 回應格式：candidates[0].content.parts[0].text\n  const content = geminiResult.candidates?.[0]?.content?.parts?.[0]?.text || '{}';\n  schema = JSON.parse(content.replace(/```json\\n?|```/g, '').trim());\n  schema.headerFingerprint = prevData.headerFingerprint;\n  schema.inferredAt = new Date().toISOString();\n} catch (e) {\n  // AI 回應解析失敗，使用預設 schema\n  schema = {\n    columns: [],\n    summary: { dateCol: null, nameCol: null, checkableHighCols: [], checkableAdvisoryCols: [] },\n    headerFingerprint: prevData.headerFingerprint,\n    parseError: e.message\n  };\n}\n\nreturn [{\n  json: {\n    ...prevData,\n    schema,\n    schemaSource: 'gemini-inferred'\n  }\n}];"
+      },
+      "id": "code-parse-schema",
+      "name": "Parse Schema Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3250, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 使用快取的 schema\nconst item = $input.first().json;\n\nreturn [{\n  json: {\n    ...item,\n    schema: item.existingSchema,\n    schemaSource: 'cached'\n  }\n}];"
+      },
+      "id": "code-use-cached-schema",
+      "name": "Use Cached Schema",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3050, 400]
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineAll",
+        "options": {}
+      },
+      "id": "merge-schema-paths",
+      "name": "Merge Schema Paths",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [3450, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={{ $env.GEMINI_API_KEY }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"contents\": [{\n    \"parts\": [{\n      \"text\": \"你是精準的資料查核員。檢查 Google Sheet 資料，判斷使用者今日是否有未填寫欄位。\\n\\n未填寫定義：空白、NA、N/A、n/a、待填、待填寫、-、--、純空格\\n已填寫定義：有任何實質內容\\n\\n流程：\\n1. 找「日期欄」= 今日的列\\n2. 找「姓名欄」與「別名」匹配的列\\n3. 檢查 checkableHigh 欄位是否未填寫\\n4. checkableAdvisory 欄位空白只列入 advisory，不算 missing\\n\\n輸出純 JSON：\\n{\\\"matchedRows\\\":[{\\\"row\\\":4,\\\"date\\\":\\\"2026/01/08\\\",\\\"name\\\":\\\"Sin\\\",\\\"missingFields\\\":[{\\\"col\\\":\\\"D\\\",\\\"header\\\":\\\"一般留言\\\",\\\"cell\\\":\\\"D4\\\"}],\\\"advisoryFields\\\":[{\\\"col\\\":\\\"F\\\",\\\"header\\\":\\\"備註\\\",\\\"cell\\\":\\\"F4\\\"}]}],\\\"summary\\\":{\\\"status\\\":\\\"missing\\\",\\\"totalMissing\\\":1,\\\"totalAdvisory\\\":1}}\\n\\nstatus: completed(無missing) / missing(有missing) / not_found(找不到今日+別名匹配)\\n\\n今日：{{ $now.format('YYYY/MM/DD') }}（也可能是 {{ $now.format('MM/DD') }} 或 {{ $now.format('M/D') }} 格式）\\n別名：{{ $json.aliases }}\\n\\nSchema：\\n{{ JSON.stringify($json.schema?.summary || {}) }}\\n\\n資料（前 500 列）：\\n{{ JSON.stringify(($json.tabData || []).slice(0, 500)) }}\\n\\n請檢查並輸出 JSON。\"\n    }]\n  }],\n  \"generationConfig\": {\n    \"temperature\": 0.1,\n    \"maxOutputTokens\": 2000\n  }\n}",
+        "options": {}
+      },
+      "id": "gemini-status-inference",
+      "name": "Gemini Status Inference",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3650, 300],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// 解析 Gemini status inference 結果，產生 reports 和 advisories\nconst geminiResult = $input.first().json;\nconst prevData = $('Merge Schema Paths').first().json;\n\nlet statusResult = null;\ntry {\n  // Gemini 回應格式：candidates[0].content.parts[0].text\n  const content = geminiResult.candidates?.[0]?.content?.parts?.[0]?.text || '{}';\n  statusResult = JSON.parse(content.replace(/```json\\n?|```/g, '').trim());\n} catch (e) {\n  statusResult = {\n    matchedRows: [],\n    summary: { status: 'error', parseError: e.message }\n  };\n}\n\nconst reports = [];\nconst advisories = [];\nconst today = new Date().toLocaleDateString('zh-TW', { month: '2-digit', day: '2-digit' }).replace(/\\//g, '/');\n\nfor (const row of (statusResult.matchedRows || [])) {\n  // 處理 missing fields\n  for (const field of (row.missingFields || [])) {\n    reports.push({\n      id: `${prevData.cacheKey}-${field.cell}`,\n      headline: `${today}｜${prevData.tabName}｜未填：${field.header}(${field.cell})`,\n      spreadsheetId: prevData.spreadsheetId,\n      sheetTitle: prevData.spreadsheetTitle,\n      sheetUrl: prevData.spreadsheetUrl,\n      tabName: prevData.tabName,\n      tabUrl: prevData.tabUrl,\n      missingFieldName: field.header,\n      cellRef: field.cell,\n      category: field.category || '',\n      aiSummary: `在 ${row.date || '今日'} 對應 ${row.name || '使用者'} 的資料列中，「${field.header}」欄位為空或標記為待填，判定未填寫`,\n      rowNumber: row.row\n    });\n  }\n  \n  // 處理 advisory fields\n  for (const field of (row.advisoryFields || [])) {\n    advisories.push({\n      sheetTitle: prevData.spreadsheetTitle,\n      tabName: prevData.tabName,\n      note: `欄位「${field.header}」(${field.cell}) 為空白，請自行檢查是否需要填寫`,\n      cellRef: field.cell\n    });\n  }\n}\n\n// 建立 warning（如果是降級讀取）\nconst warnings = [];\nif (prevData.warning) {\n  warnings.push({\n    sheetTitle: prevData.spreadsheetTitle,\n    tabName: prevData.tabName,\n    message: prevData.warning\n  });\n}\n\nreturn [{\n  json: {\n    spreadsheetId: prevData.spreadsheetId,\n    tabName: prevData.tabName,\n    cacheKey: prevData.cacheKey,\n    schema: prevData.schema,\n    schemaSource: prevData.schemaSource,\n    status: statusResult.summary?.status || 'unknown',\n    reports,\n    advisories,\n    warnings\n  }\n}];"
+      },
+      "id": "code-build-reports",
+      "name": "Build Reports",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3850, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 彙整所有 tab 的結果\nconst allItems = $input.all();\n\nconst allReports = [];\nconst allAdvisories = [];\nconst allWarnings = [];\nconst schemaUpdates = {};\n\nlet tabsScanned = 0;\nlet tabsWithErrors = 0;\n\nfor (const item of allItems) {\n  const data = item.json;\n  \n  // 如果有錯誤，記錄並跳過\n  if (data.error) {\n    tabsWithErrors++;\n    allWarnings.push({\n      sheetTitle: data.sheetInfo?.name || '未知報表',\n      tabName: '',\n      message: data.errorMessage\n    });\n    continue;\n  }\n  \n  tabsScanned++;\n  \n  // 收集 reports\n  if (data.reports) {\n    allReports.push(...data.reports);\n  }\n  \n  // 收集 advisories\n  if (data.advisories) {\n    allAdvisories.push(...data.advisories);\n  }\n  \n  // 收集 warnings\n  if (data.warnings) {\n    allWarnings.push(...data.warnings);\n  }\n  \n  // 收集需要更新的 schema（只有 AI 推斷的才需要更新）\n  if (data.schemaSource === 'gemini-inferred' && data.schema && data.cacheKey) {\n    schemaUpdates[data.cacheKey] = data.schema;\n  }\n}\n\nconst missingCount = allReports.length;\nconst completedCount = tabsScanned - (missingCount > 0 ? 1 : 0); // 簡化計算\n\nreturn [{\n  json: {\n    success: true,\n    data: {\n      summary: {\n        total: tabsScanned,\n        missing: missingCount,\n        completed: completedCount,\n        allCompleted: missingCount === 0,\n        tabsScanned,\n        tabsWithErrors\n      },\n      reports: allReports,\n      advisories: allAdvisories,\n      warnings: allWarnings\n    },\n    error: null,\n    _schemaUpdates: schemaUpdates\n  }\n}];"
+      },
+      "id": "code-aggregate-all",
+      "name": "Aggregate All Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [4050, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: $json.success, data: $json.data, error: $json.error }) }}"
+      },
+      "id": "respond-status",
+      "name": "Respond Status",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [4250, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: false, data: null, error: '使用者不存在' }) }}",
+        "options": { "responseCode": 404 }
+      },
+      "id": "respond-not-found",
+      "name": "Respond Not Found",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [850, 450]
+    }
+  ],
+  "connections": {
+    "Webhook Report Status": {
+      "main": [[{ "node": "Get User Config", "type": "main", "index": 0 }]]
+    },
+    "Get User Config": {
+      "main": [[{ "node": "User Exists?", "type": "main", "index": 0 }]]
+    },
+    "User Exists?": {
+      "main": [
+        [{ "node": "Prepare Spreadsheet Scan", "type": "main", "index": 0 }],
+        [{ "node": "Respond Not Found", "type": "main", "index": 0 }]
+      ]
+    },
+    "Prepare Spreadsheet Scan": {
+      "main": [[{ "node": "Get Spreadsheet Metadata", "type": "main", "index": 0 }]]
+    },
+    "Get Spreadsheet Metadata": {
+      "main": [[{ "node": "Extract Tabs from Metadata", "type": "main", "index": 0 }]]
+    },
+    "Extract Tabs from Metadata": {
+      "main": [[{ "node": "Read Tab Data", "type": "main", "index": 0 }]]
+    },
+    "Read Tab Data": {
+      "main": [[{ "node": "Check Degraded Read", "type": "main", "index": 0 }]]
+    },
+    "Check Degraded Read": {
+      "main": [[{ "node": "Needs Tail Read?", "type": "main", "index": 0 }]]
+    },
+    "Needs Tail Read?": {
+      "main": [
+        [{ "node": "Read Tail Data", "type": "main", "index": 0 }],
+        [{ "node": "Merge Data Paths", "type": "main", "index": 1 }]
+      ]
+    },
+    "Read Tail Data": {
+      "main": [[{ "node": "Merge Header + Tail", "type": "main", "index": 0 }]]
+    },
+    "Merge Header + Tail": {
+      "main": [[{ "node": "Merge Data Paths", "type": "main", "index": 0 }]]
+    },
+    "Merge Data Paths": {
+      "main": [[{ "node": "Calculate Header Fingerprint", "type": "main", "index": 0 }]]
+    },
+    "Calculate Header Fingerprint": {
+      "main": [[{ "node": "Needs Schema Inference?", "type": "main", "index": 0 }]]
+    },
+    "Needs Schema Inference?": {
+      "main": [
+        [{ "node": "Gemini Schema Inference", "type": "main", "index": 0 }],
+        [{ "node": "Use Cached Schema", "type": "main", "index": 0 }]
+      ]
+    },
+    "Gemini Schema Inference": {
+      "main": [[{ "node": "Parse Schema Result", "type": "main", "index": 0 }]]
+    },
+    "Parse Schema Result": {
+      "main": [[{ "node": "Merge Schema Paths", "type": "main", "index": 0 }]]
+    },
+    "Use Cached Schema": {
+      "main": [[{ "node": "Merge Schema Paths", "type": "main", "index": 1 }]]
+    },
+    "Merge Schema Paths": {
+      "main": [[{ "node": "Gemini Status Inference", "type": "main", "index": 0 }]]
+    },
+    "Gemini Status Inference": {
+      "main": [[{ "node": "Build Reports", "type": "main", "index": 0 }]]
+    },
+    "Build Reports": {
+      "main": [[{ "node": "Aggregate All Results", "type": "main", "index": 0 }]]
+    },
+    "Aggregate All Results": {
+      "main": [[{ "node": "Respond Status", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 1,
+  "pinData": {}
+}

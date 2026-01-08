@@ -1,0 +1,17 @@
+{
+    "mcpServers": {
+        "n8n-mcp": {
+            "command": "npx",
+            "args": [
+                "n8n-mcp"
+            ],
+            "env": {
+                "MCP_MODE": "stdio",
+                "LOG_LEVEL": "error",
+                "DISABLE_CONSOLE_OUTPUT": "true",
+                "N8N_API_URL": "https://lorawu.app.n8n.cloud",
+                "N8N_API_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2YWQ0ZWYyOS1hZmQwLTQ3NzYtOTA3OC00ZjZjMzQxNmNlODIiLCJpc3MiOiJuOG4iLCJhdWQiOiJwdWJsaWMtYXBpIiwiaWF0IjoxNzY3NTQyMzY0LCJleHAiOjE3NzAwNDgwMDB9.3bhFtRtWxVoQ6mk8Y6MjnlWJV2HVz0op-o_fyuZBTnM"
+            }
+        }
+    }
+}

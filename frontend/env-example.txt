@@ -1,0 +1,11 @@
+# 複製此檔案為 .env 並填入你的值
+# cp env-example.txt .env
+
+# LINE LIFF ID
+# 從 LINE Developers Console → LIFF → 你的 LIFF App 取得
+VITE_LIFF_ID=your-liff-id-here
+
+# n8n Webhook Base URL
+# 你的 n8n instance webhook URL（不含具體 path）
+VITE_API_BASE_URL=https://your-n8n-instance.app.n8n.cloud/webhook
+

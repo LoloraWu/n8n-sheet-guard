@@ -162,6 +162,45 @@ graph LR
     *   判定填寫狀態 (邏輯同核心監測)。
 3.  **回傳：** JSON 格式的詳細報告清單，供前端渲染列表。
 
+### 介面規格 (Interface Specifications) - 前後端對接合約
+
+請後端工程師依照此格式回傳資料，以符合前端預期：
+
+#### 1. POST /webhook/user-register
+**前端發送 (Payload):**
+```json
+{
+  "userId": "U12345678",
+  "realName": "王小明",
+  "aliases": ["小明", "Ming"],
+  "sheetUrls": [
+    { "name": "每日報表", "url": "https://..." }
+  ]
+}
+```
+**預期回應:**
+```json
+{
+  "status": "success",
+  "message": "設定已儲存"
+}
+```
+
+#### 2. GET /webhook/report-status?userId=U1234...
+**預期回應:**
+```json
+{
+  "reports": [
+    {
+      "name": "每日報表",
+      "status": "pending", // 或 "completed"
+      "lastCheck": "2024-01-05 10:00",
+      "url": "https://..."
+    }
+  ]
+}
+```
+
 ### Workflow C (Cron)：自動推播系統 (Notifier)
 
 此流程保持不變，作為唯一的「主動推播」機制。
@@ -265,11 +304,11 @@ graph LR
 
 為了便於多人協作，以下任務依據角色分工拆分。
 
-> **最後更新：2026-01-05**
+> **最後更新：2026-01-08**
 
 ### 🟢 前端工程師 (Frontend Team) - 負責人：Antigravity
 *   **核心職責**：Vercel 託管、LIFF SDK 整合、Vue 頁面開發。
-*   **目前進度**：✅ Phase 2 開發完成，準備對接後端
+*   **目前進度**：✅ Phase 3 整合完成，前後端對接完成
 *   **文件**：已建立 `frontend/README.md` 說明架構與執行方式。
 
 #### Phase 1: 環境與基礎建設
@@ -283,21 +322,21 @@ graph LR
 - [x] **Page 1 (Register)**: 開發註冊表單，測試 POST `/api/user/register` (UI Ready)
 - [x] **Page 2 (Dashboard)**: 開發報表儀表板，測試 GET `/api/report/status` (UI Ready)
 
-#### Phase 3: 整合與部署 (待對接)
-- [ ] **API Client**: 將前端 Mock API 替換為真實 `axios` 請求
-- [ ] **Deployment**: 部署至 Vercel 正式環境
+#### Phase 3: 整合與部署 ✅ 完成
+- [x] **API Client**: 將前端 Mock API 替換為真實 `axios` 請求 ✅
+- [x] **Deployment**: 部署至 Vercel 正式環境 (https://n8n-sheet-guard.vercel.app)
 
 ---
 
 ### 🔵 後端工程師 (Backend Team) - 負責人：ClaudeCode
 *   **核心職責**：GCP 設定、n8n 邏輯、Google Sheets 資料庫、Messaging API 推播。
-*   **目前進度**：✅ Phase 2 Workflow 開發完成，待測試
+*   **目前進度**：✅ Phase 1 & 2 完成，已部署至 n8n 雲端
 
-#### Phase 1: 環境與基礎建設
-- [ ] **GCP**: 啟用 Google Sheets/Drive API，下載 OAuth Credentials JSON
-- [ ] **LINE Messaging**: 建立 Messaging API Channel (取得 Token/Secret)
-- [ ] **n8n Auth**: 在 n8n 完成 Google 與 LINE 的憑證連線
-- [ ] **DB Init**: 建立 `Master_Sync` Google Sheet 並設定好欄位
+#### Phase 1: 環境與基礎建設 ✅ 完成
+- [x] **GCP**: 啟用 Google Sheets/Drive API，下載 OAuth Credentials JSON ✅
+- [x] **LINE Messaging**: 建立 Messaging API Channel (取得 Token/Secret) ✅
+- [x] **n8n Auth**: 在 n8n 完成 Google 與 LINE 的憑證連線 ✅
+- [x] **DB Init**: 建立 `Master_Sync` Google Sheet 並設定好欄位 ✅
 
 #### Phase 2: 邏輯與 API 開發
 - [x] **AI Prompts**: 測試並固化「欄位解析」與「狀態判定」的 Prompt ✅
@@ -328,11 +367,11 @@ graph LR
 | GET | `/api/user/profile?userId=xxx` | 取得使用者資料 |
 | GET | `/api/report/status?userId=xxx` | 取得報表填寫狀態 |
 
-#### 下一步待辦
-- [ ] 實際匯入 n8n 並測試（參考 `後端先行手動測.md`）
-- [ ] 設定 Google Sheets 憑證
-- [ ] 設定環境變數 `MASTER_SYNC_SHEET_ID`
-- [ ] 與前端串接測試
+#### 下一步待辦 ✅ 已完成
+- [x] 實際匯入 n8n 並測試（參考 `後端先行手動測.md`）✅
+- [x] 設定 Google Sheets 憑證 ✅
+- [x] 設定環境變數 `MASTER_SYNC_SHEET_ID` ✅
+- [x] 與前端串接測試 ✅
 
 ---
 

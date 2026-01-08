@@ -5,7 +5,7 @@ import Dashboard from '../views/Dashboard.vue'
 const routes = [
     {
         path: '/',
-        redirect: '/register' // Default to register for now
+        redirect: '/dashboard' // Default to dashboard (show status first)
     },
     {
         path: '/register',

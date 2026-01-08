@@ -1,7 +1,8 @@
 <script setup>
-import { ref, reactive, onMounted } from 'vue';
+import { ref, reactive, onMounted, computed } from 'vue';
 import { showToast } from 'vant';
 import liff from '@line/liff';
+import { userApi } from '@/services/api';
 
 // State
 const form = reactive({
@@ -15,27 +16,97 @@ const newSheetName = ref('');
 const newSheetUrl = ref('');
 
 const isLoading = ref(false);
+const isLoadingProfile = ref(false);
+const isExistingUser = ref(false);
+const userId = ref(null);
+
+// 取得 LIFF userId 的輔助函數
+const getLiffUserId = async () => {
+  if (!liff.isLoggedIn()) return null;
+  
+  try {
+    const context = liff.getContext();
+    if (context?.userId) return context.userId;
+    
+    const profile = await liff.getProfile();
+    return profile.userId;
+  } catch (e) {
+    console.warn('Could not get user ID:', e);
+    return null;
+  }
+};
+
+// 載入現有使用者資料
+const loadExistingProfile = async () => {
+  if (!userId.value) return;
+  
+  isLoadingProfile.value = true;
+  try {
+    const response = await userApi.getProfile(userId.value);
+    
+    if (response.success && response.data) {
+      const userData = response.data;
+      isExistingUser.value = true;
+      
+      // 回填表單資料
+      if (userData.realName) {
+        form.realName = userData.realName;
+      }
+      if (userData.aliases && userData.aliases.length > 0) {
+        form.aliases = [...userData.aliases];
+      }
+      if (userData.sheetUrls && userData.sheetUrls.length > 0) {
+        form.sheetUrls = userData.sheetUrls.map((sheet, index) => ({
+          name: sheet.name || `報表 ${index + 1}`,
+          url: sheet.url,
+          tags: sheet.tags || []
+        }));
+      }
+      
+      console.log('Loaded existing profile:', userData);
+    }
+  } catch (err) {
+    // 使用者不存在是正常情況，不需要顯示錯誤
+    console.log('No existing profile found (new user)');
+  } finally {
+    isLoadingProfile.value = false;
+  }
+};
 
 onMounted(async () => {
   try {
-    // App.vue ensures LIFF is initialized before mounting this view
+    // 取得 userId
+    userId.value = await getLiffUserId();
+    
     if (liff.isLoggedIn()) {
       const profile = await liff.getProfile();
       if (profile.displayName) {
-        // Auto-fill Real Name if empty (optional, but helpful)
-        if (!form.realName) {
-           form.realName = profile.displayName; 
-        }
+        // 先載入現有資料
+        await loadExistingProfile();
         
-        // Auto-add default alias
-        if (!form.aliases.includes(profile.displayName)) {
-          form.aliases.push(profile.displayName);
+        // 如果是新使用者，自動填入 LINE 顯示名稱
+        if (!isExistingUser.value) {
+          if (!form.realName) {
+            form.realName = profile.displayName;
+          }
+          if (!form.aliases.includes(profile.displayName)) {
+            form.aliases.push(profile.displayName);
+          }
         }
       }
     }
   } catch (err) {
-    console.error('Error fetching LIFF profile:', err);
+    console.error('Error initializing register page:', err);
   }
+});
+
+// Computed
+const submitButtonText = computed(() => {
+  return isExistingUser.value ? '更新設定' : '儲存設定';
+});
+
+const pageTitle = computed(() => {
+  return isExistingUser.value ? '編輯設定' : '個人設定 / 註冊';
 });
 
 // Methods
@@ -83,15 +154,31 @@ const onSubmit = async () => {
   
   isLoading.value = true;
   try {
-      // Mock API Call
-      console.log('Submitting:', form);
-      await new Promise(r => setTimeout(r, 1000)); // Simulate delay
+      const currentUserId = userId.value || 'U_GUEST';
       
-      showToast({ type: 'success', message: '設定已儲存' });
-      // Navigate to Dashboard or stay (depending on flow)
+      const payload = {
+          userId: currentUserId,
+          realName: form.realName,
+          aliases: form.aliases,
+          sheetUrls: form.sheetUrls
+      };
+
+      console.log('Submitting to n8n:', payload);
+      
+      const response = await userApi.register(payload);
+      
+      if (response) {
+          showToast({ 
+            type: 'success', 
+            message: isExistingUser.value ? '設定已更新' : '註冊成功' 
+          });
+          isExistingUser.value = true;
+          console.log('Response:', response);
+      }
+      
   } catch (error) {
-      showToast({ type: 'fail', message: '儲存失敗' });
-      console.error(error);
+      showToast({ type: 'fail', message: error.message || '儲存失敗' });
+      console.error('API Error:', error);
   } finally {
       isLoading.value = false;
   }
@@ -100,9 +187,20 @@ const onSubmit = async () => {
 
 <template>
   <div class="pb-20">
-    <van-nav-bar title="個人設定 / 註冊" />
+    <van-nav-bar :title="pageTitle" />
     
-    <div class="p-4">
+    <!-- Loading State -->
+    <div v-if="isLoadingProfile" class="p-8 text-center text-gray-500">
+      <van-loading size="24px" vertical>載入中...</van-loading>
+    </div>
+    
+    <div v-else class="p-4">
+      <!-- User Status Badge -->
+      <div v-if="isExistingUser" class="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg flex items-center">
+        <van-icon name="passed" color="#16a34a" size="20" class="mr-2" />
+        <span class="text-green-700 text-sm">已註冊使用者，您可以修改以下設定</span>
+      </div>
+      
       <van-form @submit="onSubmit">
         <!-- Section 1: Basic Info -->
         <h2 class="text-sm font-bold text-gray-500 mb-2 px-2">基本資料</h2>
@@ -151,6 +249,18 @@ const onSubmit = async () => {
 
         <!-- Section 3: Sheet URLs -->
         <h2 class="text-sm font-bold text-gray-500 mb-2 px-2">關注報表</h2>
+        
+        <!-- Hint: Auto scan all tabs -->
+        <div class="mx-2 mb-3 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-700">
+          <div class="flex items-start gap-2">
+            <van-icon name="info-o" class="mt-0.5 flex-shrink-0" />
+            <div>
+              <p class="font-medium">自動掃描所有分頁</p>
+              <p class="text-blue-600 mt-1">只需貼上 Google Sheet 網址，系統會自動掃描該試算表內的<strong>所有分頁</strong>，不需要另外選擇。</p>
+            </div>
+          </div>
+        </div>
+        
         <van-cell-group inset class="mb-4">
              <van-cell v-for="(sheet, index) in form.sheetUrls" :key="index" center>
                  <template #title>
@@ -186,7 +296,7 @@ const onSubmit = async () => {
         <!-- Submit -->
         <div class="mt-8 px-2">
           <van-button round block type="primary" native-type="submit" :loading="isLoading">
-            儲存設定
+            {{ submitButtonText }}
           </van-button>
         </div>
       </van-form>

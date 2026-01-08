@@ -1,0 +1,274 @@
+{
+  "name": "Workflow A - User API (v2)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "user-register",
+        "responseMode": "responseNode",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              { "name": "Access-Control-Allow-Origin", "value": "*" },
+              { "name": "Access-Control-Allow-Methods", "value": "GET, POST, OPTIONS" },
+              { "name": "Access-Control-Allow-Headers", "value": "Content-Type" }
+            ]
+          }
+        }
+      },
+      "id": "webhook-register",
+      "name": "Webhook Register",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "user-profile",
+        "responseMode": "responseNode",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              { "name": "Access-Control-Allow-Origin", "value": "*" }
+            ]
+          }
+        }
+      },
+      "id": "webhook-profile",
+      "name": "Webhook Profile",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 600]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "check-userid",
+              "leftValue": "={{ $json.body.userId }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "notEmpty" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "validate-register",
+      "name": "Validate Register Data",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 從 sheetUrls[].url 解析 spreadsheetId\nconst body = $input.first().json.body;\n\n/**\n * 解析 Google Sheets URL 提取 spreadsheetId\n * 支援格式：\n * - https://docs.google.com/spreadsheets/d/SPREADSHEET_ID/edit...\n * - https://docs.google.com/spreadsheets/d/SPREADSHEET_ID\n */\nfunction extractSpreadsheetId(url) {\n  if (!url) return null;\n  const match = url.match(/\\/spreadsheets\\/d\\/([a-zA-Z0-9-_]+)/);\n  return match ? match[1] : null;\n}\n\nconst sheetUrls = body.sheetUrls || [];\nconst parsedSheets = [];\nconst errors = [];\n\nfor (const sheet of sheetUrls) {\n  const spreadsheetId = extractSpreadsheetId(sheet.url);\n  \n  if (!spreadsheetId) {\n    errors.push(`無法解析網址: ${sheet.url}`);\n    continue;\n  }\n  \n  parsedSheets.push({\n    spreadsheetId,\n    name: sheet.name || '未命名報表',\n    url: sheet.url,\n    tags: sheet.tags || []\n  });\n}\n\nreturn [{\n  json: {\n    body: {\n      ...body,\n      parsedSheets,\n      spreadsheetIds: parsedSheets.map(s => s.spreadsheetId),\n      parseErrors: errors\n    }\n  }\n}];"
+      },
+      "id": "code-parse-urls",
+      "name": "Parse Sheet URLs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "mode": "id", "value": "={{ $env.MASTER_SYNC_SHEET_ID }}" },
+        "sheetName": { "__rl": true, "mode": "name", "value": "Master_Sync" },
+        "filters": {
+          "conditions": [
+            { "lookupColumn": "Line_UID", "lookupValue": "={{ $json.body.userId }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "sheets-check-exists",
+      "name": "Check User Exists",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [850, 300],
+      "credentials": { "googleSheetsOAuth2Api": { "id": "n8n-sheet-guard-master", "name": "n8n-sheet-guard-master" } }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "check-exists",
+              "leftValue": "={{ $input.all().length }}",
+              "rightValue": 0,
+              "operator": { "type": "number", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "if-exists",
+      "name": "User Exists?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1050, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "id", "value": "={{ $env.MASTER_SYNC_SHEET_ID }}" },
+        "sheetName": { "__rl": true, "mode": "name", "value": "Master_Sync" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Line_UID": "={{ $('Parse Sheet URLs').item.json.body.userId }}",
+            "Real_Name": "={{ $('Parse Sheet URLs').item.json.body.realName }}",
+            "Aliases": "={{ $('Parse Sheet URLs').item.json.body.aliases.join(',') }}",
+            "Target_Sheet_IDs": "={{ $('Parse Sheet URLs').item.json.body.spreadsheetIds.join(',') }}",
+            "Sheet_Urls_JSON": "={{ JSON.stringify($('Parse Sheet URLs').item.json.body.parsedSheets) }}",
+            "Sheet_Configs": "={{ JSON.stringify({}) }}",
+            "Created_At": "={{ $now.format('YYYY-MM-DD HH:mm:ss') }}",
+            "Updated_At": "={{ $now.format('YYYY-MM-DD HH:mm:ss') }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "sheets-append",
+      "name": "Append New User",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1250, 200],
+      "credentials": { "googleSheetsOAuth2Api": { "id": "n8n-sheet-guard-master", "name": "n8n-sheet-guard-master" } }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": { "__rl": true, "mode": "id", "value": "={{ $env.MASTER_SYNC_SHEET_ID }}" },
+        "sheetName": { "__rl": true, "mode": "name", "value": "Master_Sync" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Line_UID": "={{ $('Parse Sheet URLs').item.json.body.userId }}",
+            "Real_Name": "={{ $('Parse Sheet URLs').item.json.body.realName }}",
+            "Aliases": "={{ $('Parse Sheet URLs').item.json.body.aliases.join(',') }}",
+            "Target_Sheet_IDs": "={{ $('Parse Sheet URLs').item.json.body.spreadsheetIds.join(',') }}",
+            "Sheet_Urls_JSON": "={{ JSON.stringify($('Parse Sheet URLs').item.json.body.parsedSheets) }}",
+            "Updated_At": "={{ $now.format('YYYY-MM-DD HH:mm:ss') }}"
+          }
+        },
+        "options": { "cellFormat": "USER_ENTERED" }
+      },
+      "id": "sheets-update",
+      "name": "Update Existing User",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1250, 400],
+      "credentials": { "googleSheetsOAuth2Api": { "id": "n8n-sheet-guard-master", "name": "n8n-sheet-guard-master" } }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: true, data: { message: '使用者資料已儲存', spreadsheetIds: $('Parse Sheet URLs').item.json.body.spreadsheetIds, parseErrors: $('Parse Sheet URLs').item.json.body.parseErrors }, error: null }) }}"
+      },
+      "id": "respond-success",
+      "name": "Respond Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1450, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: false, data: null, error: '缺少必要欄位: userId' }) }}",
+        "options": { "responseCode": 400 }
+      },
+      "id": "respond-error",
+      "name": "Respond Error - Missing userId",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [450, 450]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "mode": "id", "value": "={{ $env.MASTER_SYNC_SHEET_ID }}" },
+        "sheetName": { "__rl": true, "mode": "name", "value": "Master_Sync" },
+        "filters": {
+          "conditions": [
+            { "lookupColumn": "Line_UID", "lookupValue": "={{ $json.query.userId }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "sheets-get-profile",
+      "name": "Get User Profile",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [450, 600],
+      "credentials": { "googleSheetsOAuth2Api": { "id": "n8n-sheet-guard-master", "name": "n8n-sheet-guard-master" } }
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.all();\n\nif (data.length === 0 || !data[0].json.Line_UID) {\n  return [{ json: { success: false, data: null, error: '使用者不存在' } }];\n}\n\nconst user = data[0].json;\n\n// 解析 Sheet_Urls_JSON（新欄位）或舊格式\nlet sheetUrls = [];\ntry {\n  if (user.Sheet_Urls_JSON) {\n    sheetUrls = JSON.parse(user.Sheet_Urls_JSON);\n  } else if (user.Target_Sheet_IDs) {\n    // 向下相容舊格式\n    const ids = user.Target_Sheet_IDs.split(',').map(s => s.trim());\n    sheetUrls = ids.map((id, idx) => ({\n      spreadsheetId: id,\n      name: `報表 ${idx + 1}`,\n      url: `https://docs.google.com/spreadsheets/d/${id}`\n    }));\n  }\n} catch (e) {\n  console.warn('Failed to parse Sheet_Urls_JSON:', e);\n}\n\nreturn [{\n  json: {\n    success: true,\n    data: {\n      userId: user.Line_UID,\n      realName: user.Real_Name,\n      aliases: user.Aliases ? user.Aliases.split(',').map(s => s.trim()) : [],\n      sheetUrls: sheetUrls,\n      sheetConfigs: user.Sheet_Configs ? JSON.parse(user.Sheet_Configs) : {},\n      createdAt: user.Created_At,\n      updatedAt: user.Updated_At\n    },\n    error: null\n  }\n}];"
+      },
+      "id": "code-format-profile",
+      "name": "Format Profile Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [650, 600]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}"
+      },
+      "id": "respond-profile",
+      "name": "Respond Profile",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [850, 600]
+    }
+  ],
+  "connections": {
+    "Webhook Register": {
+      "main": [[{ "node": "Validate Register Data", "type": "main", "index": 0 }]]
+    },
+    "Validate Register Data": {
+      "main": [
+        [{ "node": "Parse Sheet URLs", "type": "main", "index": 0 }],
+        [{ "node": "Respond Error - Missing userId", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse Sheet URLs": {
+      "main": [[{ "node": "Check User Exists", "type": "main", "index": 0 }]]
+    },
+    "Check User Exists": {
+      "main": [[{ "node": "User Exists?", "type": "main", "index": 0 }]]
+    },
+    "User Exists?": {
+      "main": [
+        [{ "node": "Append New User", "type": "main", "index": 0 }],
+        [{ "node": "Update Existing User", "type": "main", "index": 0 }]
+      ]
+    },
+    "Append New User": {
+      "main": [[{ "node": "Respond Success", "type": "main", "index": 0 }]]
+    },
+    "Update Existing User": {
+      "main": [[{ "node": "Respond Success", "type": "main", "index": 0 }]]
+    },
+    "Webhook Profile": {
+      "main": [[{ "node": "Get User Profile", "type": "main", "index": 0 }]]
+    },
+    "Get User Profile": {
+      "main": [[{ "node": "Format Profile Response", "type": "main", "index": 0 }]]
+    },
+    "Format Profile Response": {
+      "main": [[{ "node": "Respond Profile", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 2,
+  "pinData": {}
+}

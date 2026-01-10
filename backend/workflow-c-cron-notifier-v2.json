@@ -5,20 +5,59 @@
       "parameters": {
         "rule": {
           "interval": [
-            { "field": "cronExpression", "expression": "0 21,22,23 * * *" }
+            { "field": "cronExpression", "expression": "0 * * * *" }
           ]
         }
       },
       "id": "cron-trigger",
-      "name": "Daily Check (21:00, 22:00, 23:00)",
+      "name": "Hourly Check (Every Hour)",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
       "position": [250, 300]
     },
     {
       "parameters": {
+        "httpMethod": "GET",
+        "path": "test-reminder",
+        "responseMode": "lastNode",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              { "name": "Access-Control-Allow-Origin", "value": "*" }
+            ]
+          }
+        }
+      },
+      "id": "webhook-test",
+      "name": "Test Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 500]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 從 Cron 觸發時設定空的 testHour\nreturn [{ json: { testHour: null, source: 'cron' } }];"
+      },
+      "id": "code-cron-params",
+      "name": "Set Cron Params",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 從 Test Webhook 取得 testHour 參數\n// 使用方式: GET /webhook/test-reminder?hour=09:00\nconst query = $input.first().json.query || {};\nconst testHour = query.hour || null;\n\nconsole.log('🧪 Test mode triggered, testHour:', testHour);\n\nreturn [{ json: { testHour, source: 'test-webhook' } }];"
+      },
+      "id": "code-test-params",
+      "name": "Set Test Params",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [450, 500]
+    },
+    {
+      "parameters": {
         "operation": "read",
-        "documentId": { "__rl": true, "mode": "id", "value": "={{ $env.MASTER_SYNC_SHEET_ID }}" },
+        "documentId": { "__rl": true, "mode": "id", "value": "1Nn3tyYmGxioF6p_4i9vc6ABCn0NnsJu72FHC_Xlozxg" },
         "sheetName": { "__rl": true, "mode": "name", "value": "Master_Sync" },
         "options": {}
       },
@@ -26,18 +65,18 @@
       "name": "Get All Users",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.5,
-      "position": [450, 300],
+      "position": [650, 400],
       "credentials": { "googleSheetsOAuth2Api": { "id": "n8n-sheet-guard-master", "name": "n8n-sheet-guard-master" } }
     },
     {
       "parameters": {
-        "jsCode": "// 過濾有效使用者（有 Line_UID 和 Target_Sheet_IDs）\nconst users = $input.all();\n\nreturn users.filter(item => {\n  const user = item.json;\n  return user.Line_UID && user.Target_Sheet_IDs;\n}).map(item => {\n  const user = item.json;\n  \n  const spreadsheetIds = user.Target_Sheet_IDs.split(',').map(s => s.trim()).filter(Boolean);\n  const aliases = user.Aliases ? user.Aliases.split(',').map(s => s.trim()).filter(Boolean) : [];\n  \n  let sheetUrlsMap = {};\n  try {\n    if (user.Sheet_Urls_JSON) {\n      const parsed = JSON.parse(user.Sheet_Urls_JSON);\n      for (const s of parsed) {\n        sheetUrlsMap[s.spreadsheetId] = s;\n      }\n    }\n  } catch (e) {}\n  \n  let schemaCache = {};\n  try {\n    if (user.Sheet_Configs) {\n      schemaCache = JSON.parse(user.Sheet_Configs);\n    }\n  } catch (e) {}\n  \n  return {\n    json: {\n      userId: user.Line_UID,\n      realName: user.Real_Name,\n      aliases,\n      spreadsheetIds,\n      sheetUrlsMap,\n      schemaCache\n    }\n  };\n});"
+        "jsCode": "// 過濾有效使用者（有 Line_UID、Target_Sheet_IDs，且啟用提醒且當前時間符合）\nconst users = $input.all();\n\n// 🧪 取得測試參數（從前一個節點傳入）\n// 如果有 testHour，則使用測試時間；否則使用真實時間\nlet testHour = null;\ntry {\n  const cronParams = $('Set Cron Params').first();\n  if (cronParams) testHour = cronParams.json.testHour;\n} catch (e) {}\n\ntry {\n  const testParams = $('Set Test Params').first();\n  if (testParams) testHour = testParams.json.testHour;\n} catch (e) {}\n\n// 取得當前小時（台北時區）或使用測試時間\nlet currentHour;\nif (testHour && /^([01]?[0-9]|2[0-3]):00$/.test(testHour)) {\n  currentHour = testHour.padStart(5, '0'); // 確保格式 09:00\n  console.log('🧪 TEST MODE: Using test hour:', currentHour);\n} else {\n  const now = new Date();\n  const taipeiTime = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Taipei' }));\n  currentHour = taipeiTime.getHours().toString().padStart(2, '0') + ':00';\n  console.log('⏰ PRODUCTION MODE: Current hour (Taipei):', currentHour);\n}\n\nconst filteredUsers = users.filter(item => {\n  const user = item.json;\n  \n  // 基本條件：必須有 Line_UID 和 Target_Sheet_IDs\n  if (!user.Line_UID || !user.Target_Sheet_IDs) {\n    return false;\n  }\n  \n  // 檢查是否啟用提醒\n  const reminderEnabled = user.Reminder_Enabled === 'TRUE' || user.Reminder_Enabled === true;\n  if (!reminderEnabled) {\n    console.log(`User ${user.Line_UID}: Reminder not enabled, skipping`);\n    return false;\n  }\n  \n  // 檢查當前時間是否在設定的提醒時間中\n  let reminderTimes = [];\n  try {\n    if (user.Reminder_Times) {\n      reminderTimes = JSON.parse(user.Reminder_Times);\n    }\n  } catch (e) {\n    console.log(`User ${user.Line_UID}: Failed to parse Reminder_Times`);\n    return false;\n  }\n  \n  if (!Array.isArray(reminderTimes) || reminderTimes.length === 0) {\n    console.log(`User ${user.Line_UID}: No reminder times set`);\n    return false;\n  }\n  \n  // 檢查當前時間是否符合\n  const timeMatches = reminderTimes.includes(currentHour);\n  if (!timeMatches) {\n    console.log(`User ${user.Line_UID}: Current time ${currentHour} not in reminder times ${JSON.stringify(reminderTimes)}`);\n    return false;\n  }\n  \n  console.log(`✅ User ${user.Line_UID}: Time matches! Will send reminder.`);\n  return true;\n});\n\nconsole.log(`Filtered users count: ${filteredUsers.length}`);\n\nreturn filteredUsers.map(item => {\n  const user = item.json;\n  \n  const spreadsheetIds = user.Target_Sheet_IDs.split(',').map(s => s.trim()).filter(Boolean);\n  const aliases = user.Aliases ? user.Aliases.split(',').map(s => s.trim()).filter(Boolean) : [];\n  \n  let sheetUrlsMap = {};\n  try {\n    if (user.Sheet_Urls_JSON) {\n      const parsed = JSON.parse(user.Sheet_Urls_JSON);\n      for (const s of parsed) {\n        sheetUrlsMap[s.spreadsheetId] = s;\n      }\n    }\n  } catch (e) {}\n  \n  let schemaCache = {};\n  try {\n    if (user.Sheet_Configs) {\n      schemaCache = JSON.parse(user.Sheet_Configs);\n    }\n  } catch (e) {}\n  \n  return {\n    json: {\n      userId: user.Line_UID,\n      realName: user.Real_Name,\n      aliases,\n      spreadsheetIds,\n      sheetUrlsMap,\n      schemaCache\n    }\n  };\n});"
       },
       "id": "code-filter-users",
       "name": "Filter Valid Users",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [650, 300]
+      "position": [850, 400]
     },
     {
       "parameters": {
@@ -47,13 +86,14 @@
       "name": "Expand User Spreadsheets",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [850, 300]
+      "position": [1050, 400]
     },
     {
       "parameters": {
         "method": "GET",
         "url": "=https://sheets.googleapis.com/v4/spreadsheets/{{ $json.spreadsheetId }}",
-        "authentication": "oAuth2",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
         "options": {
           "response": { "response": { "fullResponse": true } }
         }
@@ -62,7 +102,7 @@
       "name": "Get Spreadsheet Metadata",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1050, 300],
+      "position": [1250, 400],
       "credentials": { "googleSheetsOAuth2Api": { "id": "n8n-sheet-guard-master", "name": "n8n-sheet-guard-master" } },
       "continueOnFail": true
     },
@@ -74,13 +114,14 @@
       "name": "Extract Tabs",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1250, 300]
+      "position": [1450, 400]
     },
     {
       "parameters": {
         "method": "GET",
         "url": "=https://sheets.googleapis.com/v4/spreadsheets/{{ $json.spreadsheetId }}/values/{{ encodeURIComponent($json.tabName) }}!A1:AZ{{ $json.needsDegradedRead ? '10' : Math.min($json.rowCount, 500) }}",
-        "authentication": "oAuth2",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
         "options": {
           "response": { "response": { "fullResponse": true } }
         }
@@ -89,7 +130,7 @@
       "name": "Read Tab Data",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1450, 300],
+      "position": [1650, 400],
       "credentials": { "googleSheetsOAuth2Api": { "id": "n8n-sheet-guard-master", "name": "n8n-sheet-guard-master" } },
       "continueOnFail": true
     },
@@ -101,7 +142,7 @@
       "name": "Prepare Tab Data",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1650, 300]
+      "position": [1850, 400]
     },
     {
       "parameters": {
@@ -111,7 +152,7 @@
       "name": "Calculate Fingerprint",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1850, 300]
+      "position": [2050, 400]
     },
     {
       "parameters": {
@@ -132,22 +173,22 @@
       "name": "Needs Schema?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [2050, 300]
+      "position": [2250, 400]
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "=https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={{ $env.GEMINI_API_KEY }}",
+        "url": "=https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={{ AIzaSyCZ_Ali-k0f0fb8-2FfoPcBLrSRActDRW4 }}",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"contents\": [{\n    \"parts\": [{\n      \"text\": \"你是一位專業的 Google Sheet 結構分析師。分析表頭欄位，推斷每個欄位的語意用途。\\n\\n欄位分類：\\n- date: 日期欄（日期、Date、時間）\\n- name: 姓名欄（姓名、Name、負責人、LINE_ID、成員）\\n- category: 分類欄（分類、類別、Category）\\n- checkableHigh: 必填欄位，空白=未填寫（進度、狀態、留言、連結、完成、回報、內容）\\n- checkableAdvisory: 選填欄位，空白只提醒（備註、Note、補充）\\n- ignore: 忽略（序號、編號、ID、#）\\n\\n輸出純 JSON，格式：\\n{\\\"columns\\\":[{\\\"col\\\":\\\"A\\\",\\\"header\\\":\\\"日期\\\",\\\"semantic\\\":\\\"date\\\"},{\\\"col\\\":\\\"B\\\",\\\"header\\\":\\\"姓名\\\",\\\"semantic\\\":\\\"name\\\"}],\\\"summary\\\":{\\\"dateCol\\\":\\\"A\\\",\\\"nameCol\\\":\\\"B\\\",\\\"checkableHighCols\\\":[\\\"C\\\",\\\"D\\\"],\\\"checkableAdvisoryCols\\\":[\\\"E\\\"]}}\\n\\nTab: {{ $json.tabName }}\\n表頭: {{ JSON.stringify($json.headerRow) }}\\n\\n請分析並輸出 JSON。\"\n    }]\n  }],\n  \"generationConfig\": {\n    \"temperature\": 0.1,\n    \"maxOutputTokens\": 1000\n  }\n}",
+        "jsonBody": "={\n  \"contents\": [{\n    \"parts\": [{\n      \"text\": \"你是一位專業的 Google Sheet 結構分析師。分析表頭欄位，推斷每個欄位的語意用途。\\n\\n欄位分類：\\n- date: 日期欄（日期、Date、時間）\\n- name: 姓名/身份欄（姓名、Name、負責人、LINE ID、LINE_ID、暱稱、成員、帳號）\\n- category: 分類欄（分類、類別、Category）\\n- checkableHigh: 必填欄位，空白=未填寫（進度、狀態、留言、連結、文章連結、完成、回報、內容、標題）\\n- checkableAdvisory: 選填欄位，空白只提醒（備註、Note、補充）\\n- ignore: 忽略（序號、編號、ID、#）\\n\\n注意：\\n1. 如果第一列是大標題（如「XXX討論區」），表頭應該在第二列\\n2. nameCol 可以有多個（如姓名欄和 LINE ID 欄都算）\\n\\n輸出純 JSON，格式：\\n{\\\"columns\\\":[{\\\"col\\\":\\\"A\\\",\\\"header\\\":\\\"日期\\\",\\\"semantic\\\":\\\"date\\\"},{\\\"col\\\":\\\"B\\\",\\\"header\\\":\\\"姓名\\\",\\\"semantic\\\":\\\"name\\\"}],\\\"summary\\\":{\\\"dateCol\\\":\\\"B\\\",\\\"nameCols\\\":[\\\"E\\\",\\\"F\\\"],\\\"checkableHighCols\\\":[\\\"C\\\",\\\"D\\\"],\\\"checkableAdvisoryCols\\\":[]}}\\n\\nTab: {{ $json.tabName }}\\n表頭: {{ JSON.stringify($json.headerRow) }}\\n\\n請分析並輸出 JSON。\"\n    }]\n  }],\n  \"generationConfig\": {\n    \"temperature\": 0.1,\n    \"maxOutputTokens\": 1000\n  }\n}",
         "options": {}
       },
       "id": "gemini-schema",
       "name": "Gemini Schema Inference",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [2250, 200],
+      "position": [2450, 300],
       "continueOnFail": true
     },
     {
@@ -158,7 +199,7 @@
       "name": "Parse Schema",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2450, 200]
+      "position": [2650, 300]
     },
     {
       "parameters": {
@@ -168,7 +209,7 @@
       "name": "Use Cached Schema",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2250, 400]
+      "position": [2450, 500]
     },
     {
       "parameters": {
@@ -180,22 +221,22 @@
       "name": "Merge Schema Paths",
       "type": "n8n-nodes-base.merge",
       "typeVersion": 3,
-      "position": [2650, 300]
+      "position": [2850, 400]
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "=https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={{ $env.GEMINI_API_KEY }}",
+        "url": "=https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={{ AIzaSyCZ_Ali-k0f0fb8-2FfoPcBLrSRActDRW4 }}",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"contents\": [{\n    \"parts\": [{\n      \"text\": \"你是精準的資料查核員。檢查 Google Sheet 資料，判斷使用者今日是否有未填寫欄位。\\n\\n未填寫定義：空白、NA、N/A、n/a、待填、待填寫、-、--、純空格\\n已填寫定義：有任何實質內容\\n\\n流程：\\n1. 找「日期欄」= 今日的列\\n2. 找「姓名欄」與「別名」匹配的列\\n3. 檢查 checkableHigh 欄位是否未填寫\\n4. checkableAdvisory 欄位空白只列入 advisory，不算 missing\\n\\n輸出純 JSON：\\n{\\\"matchedRows\\\":[{\\\"row\\\":4,\\\"date\\\":\\\"2026/01/08\\\",\\\"name\\\":\\\"Sin\\\",\\\"missingFields\\\":[{\\\"col\\\":\\\"D\\\",\\\"header\\\":\\\"一般留言\\\",\\\"cell\\\":\\\"D4\\\"}],\\\"advisoryFields\\\":[{\\\"col\\\":\\\"F\\\",\\\"header\\\":\\\"備註\\\",\\\"cell\\\":\\\"F4\\\"}]}],\\\"summary\\\":{\\\"status\\\":\\\"missing\\\",\\\"totalMissing\\\":1,\\\"totalAdvisory\\\":1}}\\n\\nstatus: completed(無missing) / missing(有missing) / not_found(找不到今日+別名匹配)\\n\\n今日：{{ $now.format('YYYY/MM/DD') }}（也可能是 {{ $now.format('MM/DD') }} 或 {{ $now.format('M/D') }} 格式）\\n別名：{{ $json.aliases }}\\n\\nSchema：\\n{{ JSON.stringify($json.schema?.summary || {}) }}\\n\\n資料（前 500 列）：\\n{{ JSON.stringify(($json.tabData || []).slice(0, 500)) }}\\n\\n請檢查並輸出 JSON。\"\n    }]\n  }],\n  \"generationConfig\": {\n    \"temperature\": 0.1,\n    \"maxOutputTokens\": 2000\n  }\n}",
+        "jsonBody": "={\n  \"contents\": [{\n    \"parts\": [{\n      \"text\": \"你是精準的資料查核員。檢查 Google Sheet 資料，判斷使用者今日是否有未填寫欄位。\\n\\n未填寫定義：空白、NA、N/A、n/a、待填、待填寫、-、--、純空格\\n已填寫定義：有任何實質內容\\n\\n流程：\\n1. 找「日期欄」= 今日的列（注意：日期可能有多種格式）\\n2. 找「姓名欄」或「LINE ID」欄與「別名」匹配的列\\n3. 檢查 checkableHigh 欄位是否未填寫\\n4. checkableAdvisory 欄位空白只列入 advisory，不算 missing\\n\\n輸出純 JSON：\\n{\\\"matchedRows\\\":[{\\\"row\\\":4,\\\"date\\\":\\\"1月10日\\\",\\\"name\\\":\\\"Sin\\\",\\\"missingFields\\\":[{\\\"col\\\":\\\"D\\\",\\\"header\\\":\\\"文章連結\\\",\\\"cell\\\":\\\"D4\\\"}],\\\"advisoryFields\\\":[]}],\\\"summary\\\":{\\\"status\\\":\\\"missing\\\",\\\"totalMissing\\\":1,\\\"totalAdvisory\\\":0}}\\n\\nstatus: completed(無missing) / missing(有missing) / not_found(找不到今日+別名匹配)\\n\\n今日日期（請匹配任一格式）：\\n- {{ $now.format('YYYY/MM/DD') }}\\n- {{ $now.format('YYYY-MM-DD') }}\\n- {{ $now.format('MM/DD') }}\\n- {{ $now.format('M/D') }}\\n- {{ $now.format('M') }}月{{ $now.format('D') }}日\\n- {{ $now.format('MM') }}月{{ $now.format('DD') }}日\\n\\n別名（請在姓名欄或 LINE ID 欄匹配）：{{ $json.aliases }}\\n\\nSchema：\\n{{ JSON.stringify($json.schema?.summary || {}) }}\\n\\n資料（前 500 列）：\\n{{ JSON.stringify(($json.tabData || []).slice(0, 500)) }}\\n\\n請檢查並輸出 JSON。\"\n    }]\n  }],\n  \"generationConfig\": {\n    \"temperature\": 0.1,\n    \"maxOutputTokens\": 2000\n  }\n}",
         "options": {}
       },
       "id": "gemini-status",
       "name": "Gemini Status Inference",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [2850, 300],
+      "position": [3050, 400],
       "continueOnFail": true
     },
     {
@@ -206,7 +247,7 @@
       "name": "Build Reports",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [3050, 300]
+      "position": [3250, 400]
     },
     {
       "parameters": {
@@ -216,7 +257,7 @@
       "name": "Aggregate by User",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [3250, 300]
+      "position": [3450, 400]
     },
     {
       "parameters": {
@@ -237,17 +278,17 @@
       "name": "Has Missing?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [3450, 300]
+      "position": [3650, 400]
     },
     {
       "parameters": {
-        "jsCode": "// 建立 LINE 推播訊息\nconst user = $input.first().json;\n\nconst reports = user.reports || [];\nconst advisories = user.advisories || [];\n\n// 建立訊息內容\nlet message = `📋 ${user.realName || '您'}，今日有 ${reports.length} 項未填寫：\\n\\n`;\n\n// 按 sheetTitle 分組\nconst bySheet = {};\nfor (const r of reports) {\n  const key = r.sheetTitle || '未知報表';\n  if (!bySheet[key]) bySheet[key] = [];\n  bySheet[key].push(r);\n}\n\nfor (const [sheetTitle, items] of Object.entries(bySheet)) {\n  message += `📊 ${sheetTitle}\\n`;\n  for (const item of items) {\n    message += `  • ${item.tabName}：${item.missingFieldName}\\n`;\n  }\n  message += '\\n';\n}\n\n// 加入 advisory 提醒（最多 3 條）\nif (advisories.length > 0) {\n  message += `\\n💡 另有 ${advisories.length} 項選填欄位請自行檢查`;\n}\n\nmessage += `\\n\\n前往填寫 👉 https://liff.line.me/${$env.LIFF_ID || 'YOUR_LIFF_ID'}`;\n\nreturn [{\n  json: {\n    userId: user.userId,\n    message,\n    reportsCount: reports.length\n  }\n}];"
+        "jsCode": "// 建立 LINE 推播訊息\nconst user = $input.first().json;\n\nconst reports = user.reports || [];\nconst advisories = user.advisories || [];\n\n// 建立訊息內容\nlet message = `📋 ${user.realName || '您'}，今日有 ${reports.length} 項未填寫：\\n\\n`;\n\n// 按 sheetTitle 分組\nconst bySheet = {};\nfor (const r of reports) {\n  const key = r.sheetTitle || '未知報表';\n  if (!bySheet[key]) bySheet[key] = [];\n  bySheet[key].push(r);\n}\n\nfor (const [sheetTitle, items] of Object.entries(bySheet)) {\n  message += `📊 ${sheetTitle}\\n`;\n  for (const item of items) {\n    message += `  • ${item.tabName}：${item.missingFieldName}\\n`;\n  }\n  message += '\\n';\n}\n\n// 加入 advisory 提醒（最多 3 條）\nif (advisories.length > 0) {\n  message += `\\n💡 另有 ${advisories.length} 項選填欄位請自行檢查`;\n}\n\nmessage += `\\n\\n前往填寫 👉 https://liff.line.me/${'2008820860-ESw51iC9'}`;\n\nreturn [{\n  json: {\n    userId: user.userId,\n    message,\n    reportsCount: reports.length\n  }\n}];"
       },
       "id": "code-build-message",
       "name": "Build LINE Message",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [3650, 300]
+      "position": [3850, 400]
     },
     {
       "parameters": {
@@ -256,7 +297,7 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "Authorization", "value": "=Bearer {{ $env.LINE_CHANNEL_ACCESS_TOKEN }}" },
+            { "name": "Authorization", "value": "=Bearer {{ OhANkSHFMtfZ6c40S1sJnzLVysuZXw3jFL7ZQHRF2EYE1My/C+cDelISqylrzKqJm5a31/IER5Nhv4uizKl+sTu3K65w9YF5jrmJBx+QbQssbCV53L4cUJpP6qcrNFKJ6p2KDxwAAprGMKS/PNrNMAdB04t89/1O/w1cDnyilFU= }}" },
             { "name": "Content-Type", "value": "application/json" }
           ]
         },
@@ -269,7 +310,7 @@
       "name": "LINE Push Message",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [3850, 300],
+      "position": [4050, 400],
       "continueOnFail": true
     },
     {
@@ -280,11 +321,20 @@
       "name": "Log Push Result",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [4050, 300]
+      "position": [4250, 400]
     }
   ],
   "connections": {
-    "Daily Check (21:00, 22:00, 23:00)": {
+    "Hourly Check (Every Hour)": {
+      "main": [[{ "node": "Set Cron Params", "type": "main", "index": 0 }]]
+    },
+    "Test Webhook": {
+      "main": [[{ "node": "Set Test Params", "type": "main", "index": 0 }]]
+    },
+    "Set Cron Params": {
+      "main": [[{ "node": "Get All Users", "type": "main", "index": 0 }]]
+    },
+    "Set Test Params": {
       "main": [[{ "node": "Get All Users", "type": "main", "index": 0 }]]
     },
     "Get All Users": {
@@ -354,6 +404,6 @@
   "settings": { "executionOrder": "v1" },
   "staticData": null,
   "tags": [],
-  "triggerCount": 1,
+  "triggerCount": 2,
   "pinData": {}
 }

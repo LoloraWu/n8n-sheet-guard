@@ -64,7 +64,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// 從 sheetUrls[].url 解析 spreadsheetId\nconst body = $input.first().json.body;\n\n/**\n * 解析 Google Sheets URL 提取 spreadsheetId\n * 支援格式：\n * - https://docs.google.com/spreadsheets/d/SPREADSHEET_ID/edit...\n * - https://docs.google.com/spreadsheets/d/SPREADSHEET_ID\n */\nfunction extractSpreadsheetId(url) {\n  if (!url) return null;\n  const match = url.match(/\\/spreadsheets\\/d\\/([a-zA-Z0-9-_]+)/);\n  return match ? match[1] : null;\n}\n\nconst sheetUrls = body.sheetUrls || [];\nconst parsedSheets = [];\nconst errors = [];\n\nfor (const sheet of sheetUrls) {\n  const spreadsheetId = extractSpreadsheetId(sheet.url);\n  \n  if (!spreadsheetId) {\n    errors.push(`無法解析網址: ${sheet.url}`);\n    continue;\n  }\n  \n  parsedSheets.push({\n    spreadsheetId,\n    name: sheet.name || '未命名報表',\n    url: sheet.url,\n    tags: sheet.tags || []\n  });\n}\n\nreturn [{\n  json: {\n    body: {\n      ...body,\n      parsedSheets,\n      spreadsheetIds: parsedSheets.map(s => s.spreadsheetId),\n      parseErrors: errors\n    }\n  }\n}];"
+        "jsCode": "// 從 sheetUrls[].url 解析 spreadsheetId（含去重邏輯）\nconst body = $input.first().json.body;\n\nfunction extractSpreadsheetId(url) {\n  if (!url) return null;\n  const match = url.match(/\\/spreadsheets\\/d\\/([a-zA-Z0-9-_]+)/);\n  return match ? match[1] : null;\n}\n\nconst sheetUrls = body.sheetUrls || [];\nconst sheetsMap = new Map(); // 用 spreadsheetId 去重\nconst errors = [];\n\nfor (const sheet of sheetUrls) {\n  const spreadsheetId = extractSpreadsheetId(sheet.url);\n  \n  if (!spreadsheetId) {\n    errors.push(`無法解析網址: ${sheet.url}`);\n    continue;\n  }\n  \n  // 如果已存在相同 spreadsheetId，合併 tags，保留第一個的 name\n  if (sheetsMap.has(spreadsheetId)) {\n    const existing = sheetsMap.get(spreadsheetId);\n    const newTags = sheet.tags || [];\n    existing.tags = [...new Set([...existing.tags, ...newTags])];\n  } else {\n    sheetsMap.set(spreadsheetId, {\n      spreadsheetId,\n      name: sheet.name || '未命名報表',\n      url: `https://docs.google.com/spreadsheets/d/${spreadsheetId}`, // 標準化 URL\n      tags: sheet.tags || []\n    });\n  }\n}\n\nconst parsedSheets = Array.from(sheetsMap.values());\n\n// 輸出每個 sheet 作為獨立項目，以便批次處理\nif (parsedSheets.length === 0) {\n  return [{\n    json: {\n      body: {\n        ...body,\n        parsedSheets: [],\n        spreadsheetIds: [],\n        parseErrors: errors\n      },\n      hasSheets: false\n    }\n  }];\n}\n\nreturn [{\n  json: {\n    body: {\n      ...body,\n      parsedSheets,\n      spreadsheetIds: parsedSheets.map(s => s.spreadsheetId),\n      parseErrors: errors\n    },\n    hasSheets: true,\n    sheetsToFetch: parsedSheets\n  }\n}];"
       },
       "id": "code-parse-urls",
       "name": "Parse Sheet URLs",
@@ -74,8 +74,68 @@
     },
     {
       "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "check-has-sheets",
+              "leftValue": "={{ $json.hasSheets }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "if-has-sheets",
+      "name": "Has Sheets?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 展開 sheets 為多個項目，準備批次呼叫 Google API\nconst inputData = $input.first().json;\nconst sheets = inputData.sheetsToFetch || [];\n\nreturn sheets.map(sheet => ({\n  json: {\n    ...sheet,\n    originalBody: inputData.body\n  }\n}));"
+      },
+      "id": "code-split-sheets",
+      "name": "Split Sheets",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1050, 200]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://sheets.googleapis.com/v4/spreadsheets/{{ $json.spreadsheetId }}?fields=properties.title",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "options": {
+          "response": {
+            "response": { "neverError": true }
+          }
+        }
+      },
+      "id": "http-get-sheet-title",
+      "name": "Get Sheet Title",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1250, 200],
+      "credentials": { "googleSheetsOAuth2Api": { "id": "n8n-sheet-guard-master", "name": "n8n-sheet-guard-master" } }
+    },
+    {
+      "parameters": {
+        "jsCode": "// 合併所有 sheet 的真實標題到原始資料\nconst allItems = $input.all();\nconst originalBody = allItems[0]?.json?.originalBody;\n\nif (!originalBody) {\n  return [{ json: { error: 'Missing originalBody' } }];\n}\n\nconst parsedSheets = [];\nfor (const item of allItems) {\n  const json = item.json;\n  \n  // 從 Google API 回應中取得真實標題\n  let realTitle = json.name; // 預設使用用戶輸入的名稱\n  \n  if (json.properties?.title) {\n    realTitle = json.properties.title;\n  }\n  \n  parsedSheets.push({\n    spreadsheetId: json.spreadsheetId,\n    name: realTitle,\n    url: json.url,\n    tags: json.tags || []\n  });\n}\n\nreturn [{\n  json: {\n    body: {\n      ...originalBody,\n      parsedSheets,\n      spreadsheetIds: parsedSheets.map(s => s.spreadsheetId),\n      parseErrors: originalBody.parseErrors || []\n    }\n  }\n}];"
+      },
+      "id": "code-merge-titles",
+      "name": "Merge Sheet Titles",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1450, 200]
+    },
+    {
+      "parameters": {
         "operation": "read",
-        "documentId": { "__rl": true, "mode": "id", "value": "={{ $env.MASTER_SYNC_SHEET_ID }}" },
+        "documentId": { "__rl": true, "mode": "id", "value": "1Nn3tyYmGxioF6p_4i9vc6ABCn0NnsJu72FHC_Xlozxg" },
         "sheetName": { "__rl": true, "mode": "name", "value": "Master_Sync" },
         "filters": {
           "conditions": [
@@ -88,8 +148,19 @@
       "name": "Check User Exists",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.5,
-      "position": [850, 300],
-      "credentials": { "googleSheetsOAuth2Api": { "id": "n8n-sheet-guard-master", "name": "n8n-sheet-guard-master" } }
+      "position": [1650, 300],
+      "credentials": { "googleSheetsOAuth2Api": { "id": "n8n-sheet-guard-master", "name": "n8n-sheet-guard-master" } },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// 判斷用戶是否存在，並準備寫入資料（key 名稱與表單欄位一致）\nconst sheetResult = $input.all();\nconst parsedData = $('Merge Sheet Titles').first()?.json?.body || $('Parse Sheet URLs').first()?.json?.body;\nconst targetUserId = parsedData.userId;\n\n// 手動檢查是否有匹配的用戶（因為 Google Sheets filter 可能沒生效）\nconst matchedUser = sheetResult.find(item => item.json && item.json.Line_UID === targetUserId);\nconst userExists = !!matchedUser;\n\nconst timestamp = new Date().toISOString().replace('T', ' ').substring(0, 19);\n\nreturn [{\n  json: {\n    userExists: userExists,\n    parseErrors: parsedData.parseErrors || [],\n    Line_UID: parsedData.userId,\n    Real_Name: parsedData.realName,\n    Aliases: (parsedData.aliases || []).join(','),\n    Target_Sheet_IDs: (parsedData.spreadsheetIds || []).join(','),\n    Sheet_Urls_JSON: JSON.stringify(parsedData.parsedSheets || []),\n    Sheet_Configs: '{}',\n    Created_At: timestamp,\n    Updated_At: timestamp\n  }\n}];"
+      },
+      "id": "code-check-user",
+      "name": "Check User & Prepare Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1850, 300]
     },
     {
       "parameters": {
@@ -98,9 +169,9 @@
           "conditions": [
             {
               "id": "check-exists",
-              "leftValue": "={{ $input.all().length }}",
-              "rightValue": 0,
-              "operator": { "type": "number", "operation": "equals" }
+              "leftValue": "={{ $json.userExists }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "equals" }
             }
           ],
           "combinator": "and"
@@ -110,25 +181,16 @@
       "name": "User Exists?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [1050, 300]
+      "position": [2050, 300]
     },
     {
       "parameters": {
         "operation": "append",
-        "documentId": { "__rl": true, "mode": "id", "value": "={{ $env.MASTER_SYNC_SHEET_ID }}" },
+        "documentId": { "__rl": true, "mode": "id", "value": "1Nn3tyYmGxioF6p_4i9vc6ABCn0NnsJu72FHC_Xlozxg" },
         "sheetName": { "__rl": true, "mode": "name", "value": "Master_Sync" },
         "columns": {
-          "mappingMode": "defineBelow",
-          "value": {
-            "Line_UID": "={{ $('Parse Sheet URLs').item.json.body.userId }}",
-            "Real_Name": "={{ $('Parse Sheet URLs').item.json.body.realName }}",
-            "Aliases": "={{ $('Parse Sheet URLs').item.json.body.aliases.join(',') }}",
-            "Target_Sheet_IDs": "={{ $('Parse Sheet URLs').item.json.body.spreadsheetIds.join(',') }}",
-            "Sheet_Urls_JSON": "={{ JSON.stringify($('Parse Sheet URLs').item.json.body.parsedSheets) }}",
-            "Sheet_Configs": "={{ JSON.stringify({}) }}",
-            "Created_At": "={{ $now.format('YYYY-MM-DD HH:mm:ss') }}",
-            "Updated_At": "={{ $now.format('YYYY-MM-DD HH:mm:ss') }}"
-          }
+          "mappingMode": "autoMapInputData",
+          "value": {}
         },
         "options": {}
       },
@@ -136,24 +198,18 @@
       "name": "Append New User",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.5,
-      "position": [1250, 200],
+      "position": [2250, 400],
       "credentials": { "googleSheetsOAuth2Api": { "id": "n8n-sheet-guard-master", "name": "n8n-sheet-guard-master" } }
     },
     {
       "parameters": {
         "operation": "update",
-        "documentId": { "__rl": true, "mode": "id", "value": "={{ $env.MASTER_SYNC_SHEET_ID }}" },
+        "documentId": { "__rl": true, "mode": "id", "value": "1Nn3tyYmGxioF6p_4i9vc6ABCn0NnsJu72FHC_Xlozxg" },
         "sheetName": { "__rl": true, "mode": "name", "value": "Master_Sync" },
         "columns": {
-          "mappingMode": "defineBelow",
-          "value": {
-            "Line_UID": "={{ $('Parse Sheet URLs').item.json.body.userId }}",
-            "Real_Name": "={{ $('Parse Sheet URLs').item.json.body.realName }}",
-            "Aliases": "={{ $('Parse Sheet URLs').item.json.body.aliases.join(',') }}",
-            "Target_Sheet_IDs": "={{ $('Parse Sheet URLs').item.json.body.spreadsheetIds.join(',') }}",
-            "Sheet_Urls_JSON": "={{ JSON.stringify($('Parse Sheet URLs').item.json.body.parsedSheets) }}",
-            "Updated_At": "={{ $now.format('YYYY-MM-DD HH:mm:ss') }}"
-          }
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": ["Line_UID"]
         },
         "options": { "cellFormat": "USER_ENTERED" }
       },
@@ -161,19 +217,30 @@
       "name": "Update Existing User",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.5,
-      "position": [1250, 400],
-      "credentials": { "googleSheetsOAuth2Api": { "id": "n8n-sheet-guard-master", "name": "n8n-sheet-guard-master" } }
+      "position": [2250, 200],
+      "credentials": { "googleSheetsOAuth2Api": { "id": "n8n-sheet-guard-master", "name": "n8n-sheet-guard-master" } },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// 準備成功回應\nconst prevData = $('Check User & Prepare Data').first().json;\n\nreturn [{\n  json: {\n    success: true,\n    data: {\n      message: '使用者資料已儲存',\n      userId: prevData.Line_UID,\n      spreadsheetIds: prevData.Target_Sheet_IDs ? prevData.Target_Sheet_IDs.split(',').filter(Boolean) : [],\n      parseErrors: prevData.parseErrors\n    },\n    error: null\n  }\n}];"
+      },
+      "id": "code-prepare-response",
+      "name": "Prepare Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2450, 300]
     },
     {
       "parameters": {
         "respondWith": "json",
-        "responseBody": "={{ JSON.stringify({ success: true, data: { message: '使用者資料已儲存', spreadsheetIds: $('Parse Sheet URLs').item.json.body.spreadsheetIds, parseErrors: $('Parse Sheet URLs').item.json.body.parseErrors }, error: null }) }}"
+        "responseBody": "={{ JSON.stringify($json) }}"
       },
       "id": "respond-success",
       "name": "Respond Success",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [1450, 300]
+      "position": [2650, 300]
     },
     {
       "parameters": {
@@ -190,7 +257,7 @@
     {
       "parameters": {
         "operation": "read",
-        "documentId": { "__rl": true, "mode": "id", "value": "={{ $env.MASTER_SYNC_SHEET_ID }}" },
+        "documentId": { "__rl": true, "mode": "id", "value": "1Nn3tyYmGxioF6p_4i9vc6ABCn0NnsJu72FHC_Xlozxg" },
         "sheetName": { "__rl": true, "mode": "name", "value": "Master_Sync" },
         "filters": {
           "conditions": [
@@ -208,7 +275,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const data = $input.all();\n\nif (data.length === 0 || !data[0].json.Line_UID) {\n  return [{ json: { success: false, data: null, error: '使用者不存在' } }];\n}\n\nconst user = data[0].json;\n\n// 解析 Sheet_Urls_JSON（新欄位）或舊格式\nlet sheetUrls = [];\ntry {\n  if (user.Sheet_Urls_JSON) {\n    sheetUrls = JSON.parse(user.Sheet_Urls_JSON);\n  } else if (user.Target_Sheet_IDs) {\n    // 向下相容舊格式\n    const ids = user.Target_Sheet_IDs.split(',').map(s => s.trim());\n    sheetUrls = ids.map((id, idx) => ({\n      spreadsheetId: id,\n      name: `報表 ${idx + 1}`,\n      url: `https://docs.google.com/spreadsheets/d/${id}`\n    }));\n  }\n} catch (e) {\n  console.warn('Failed to parse Sheet_Urls_JSON:', e);\n}\n\nreturn [{\n  json: {\n    success: true,\n    data: {\n      userId: user.Line_UID,\n      realName: user.Real_Name,\n      aliases: user.Aliases ? user.Aliases.split(',').map(s => s.trim()) : [],\n      sheetUrls: sheetUrls,\n      sheetConfigs: user.Sheet_Configs ? JSON.parse(user.Sheet_Configs) : {},\n      createdAt: user.Created_At,\n      updatedAt: user.Updated_At\n    },\n    error: null\n  }\n}];"
+        "jsCode": "const data = $input.all();\n\nif (data.length === 0 || !data[0].json.Line_UID) {\n  return [{ json: { success: false, data: null, error: '使用者不存在' } }];\n}\n\nconst user = data[0].json;\n\nlet sheetUrls = [];\ntry {\n  if (user.Sheet_Urls_JSON) {\n    sheetUrls = JSON.parse(user.Sheet_Urls_JSON);\n  } else if (user.Target_Sheet_IDs) {\n    const ids = user.Target_Sheet_IDs.split(',').map(s => s.trim());\n    sheetUrls = ids.map((id, idx) => ({\n      spreadsheetId: id,\n      name: `報表 ${idx + 1}`,\n      url: `https://docs.google.com/spreadsheets/d/${id}`\n    }));\n  }\n} catch (e) {\n  console.warn('Failed to parse Sheet_Urls_JSON:', e);\n}\n\nreturn [{\n  json: {\n    success: true,\n    data: {\n      userId: user.Line_UID,\n      realName: user.Real_Name,\n      aliases: user.Aliases ? user.Aliases.split(',').map(s => s.trim()) : [],\n      sheetUrls: sheetUrls,\n      sheetConfigs: user.Sheet_Configs ? JSON.parse(user.Sheet_Configs) : {},\n      createdAt: user.Created_At,\n      updatedAt: user.Updated_At\n    },\n    error: null\n  }\n}];"
       },
       "id": "code-format-profile",
       "name": "Format Profile Response",
@@ -226,6 +293,498 @@
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
       "position": [850, 600]
+    },
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "available-sheets",
+        "responseMode": "responseNode",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              { "name": "Access-Control-Allow-Origin", "value": "*" }
+            ]
+          }
+        }
+      },
+      "id": "webhook-available-sheets",
+      "name": "Webhook Available Sheets",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 900]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "mode": "id", "value": "1Nn3tyYmGxioF6p_4i9vc6ABCn0NnsJu72FHC_Xlozxg" },
+        "sheetName": { "__rl": true, "mode": "name", "value": "Master_Sync" },
+        "options": {}
+      },
+      "id": "sheets-get-all-users",
+      "name": "Get All Users",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [450, 900],
+      "credentials": { "googleSheetsOAuth2Api": { "id": "n8n-sheet-guard-master", "name": "n8n-sheet-guard-master" } }
+    },
+    {
+      "parameters": {
+        "jsCode": "// 從所有使用者的 Sheet_Urls_JSON 中提取所有可用的表單，去重後返回\n// 回傳格式：{ spreadsheetId, name (真實標題), url }\nconst allUsers = $input.all();\nconst sheetsMap = new Map(); // 用 spreadsheetId 作為 key 去重\n\nfor (const item of allUsers) {\n  const user = item.json;\n  if (!user.Sheet_Urls_JSON) continue;\n  \n  try {\n    const sheets = JSON.parse(user.Sheet_Urls_JSON);\n    for (const sheet of sheets) {\n      if (sheet.spreadsheetId && !sheetsMap.has(sheet.spreadsheetId)) {\n        sheetsMap.set(sheet.spreadsheetId, {\n          spreadsheetId: sheet.spreadsheetId,\n          name: sheet.name || '未命名報表',  // 這裡的 name 現在是真實標題\n          url: sheet.url || `https://docs.google.com/spreadsheets/d/${sheet.spreadsheetId}`\n        });\n      }\n    }\n  } catch (e) {\n    console.warn('Failed to parse Sheet_Urls_JSON for user:', user.Line_UID, e);\n  }\n}\n\nconst availableSheets = Array.from(sheetsMap.values());\n\n// 按名稱排序\navailableSheets.sort((a, b) => a.name.localeCompare(b.name, 'zh-TW'));\n\nreturn [{\n  json: {\n    success: true,\n    data: {\n      sheets: availableSheets,\n      total: availableSheets.length\n    },\n    error: null\n  }\n}];"
+      },
+      "id": "code-collect-sheets",
+      "name": "Collect All Sheets",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [650, 900]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}"
+      },
+      "id": "respond-available-sheets",
+      "name": "Respond Available Sheets",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [850, 900]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "mode": "id", "value": "1Nn3tyYmGxioF6p_4i9vc6ABCn0NnsJu72FHC_Xlozxg" },
+        "sheetName": { "__rl": true, "mode": "name", "value": "Master_Sync" },
+        "filters": {
+          "conditions": [
+            { "lookupColumn": "Line_UID", "lookupValue": "={{ $json.body.userId }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "sheets-check-exists-no-sheets",
+      "name": "Check User Exists (No Sheets)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1050, 400],
+      "credentials": { "googleSheetsOAuth2Api": { "id": "n8n-sheet-guard-master", "name": "n8n-sheet-guard-master" } },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// 判斷用戶是否存在（無 Sheet 情況），並準備寫入資料（key 名稱與表單欄位一致）\nconst sheetResult = $input.all();\nconst parsedData = $('Parse Sheet URLs').first().json.body;\nconst targetUserId = parsedData.userId;\n\n// 手動檢查是否有匹配的用戶\nconst matchedUser = sheetResult.find(item => item.json && item.json.Line_UID === targetUserId);\nconst userExists = !!matchedUser;\n\nconst timestamp = new Date().toISOString().replace('T', ' ').substring(0, 19);\n\nreturn [{\n  json: {\n    userExists: userExists,\n    parseErrors: parsedData.parseErrors || [],\n    Line_UID: parsedData.userId,\n    Real_Name: parsedData.realName,\n    Aliases: (parsedData.aliases || []).join(','),\n    Target_Sheet_IDs: '',\n    Sheet_Urls_JSON: '[]',\n    Sheet_Configs: '{}',\n    Created_At: timestamp,\n    Updated_At: timestamp\n  }\n}];"
+      },
+      "id": "code-check-user-no-sheets",
+      "name": "Check User (No Sheets)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1250, 400]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "check-exists-2",
+              "leftValue": "={{ $json.userExists }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "if-exists-no-sheets",
+      "name": "User Exists? (No Sheets)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1450, 400]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "id", "value": "1Nn3tyYmGxioF6p_4i9vc6ABCn0NnsJu72FHC_Xlozxg" },
+        "sheetName": { "__rl": true, "mode": "name", "value": "Master_Sync" },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {}
+        },
+        "options": {}
+      },
+      "id": "sheets-append-no-sheets",
+      "name": "Append New User (No Sheets)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1650, 500],
+      "credentials": { "googleSheetsOAuth2Api": { "id": "n8n-sheet-guard-master", "name": "n8n-sheet-guard-master" } }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": { "__rl": true, "mode": "id", "value": "1Nn3tyYmGxioF6p_4i9vc6ABCn0NnsJu72FHC_Xlozxg" },
+        "sheetName": { "__rl": true, "mode": "name", "value": "Master_Sync" },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": ["Line_UID"]
+        },
+        "options": { "cellFormat": "USER_ENTERED" }
+      },
+      "id": "sheets-update-no-sheets",
+      "name": "Update User (No Sheets)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1650, 300],
+      "credentials": { "googleSheetsOAuth2Api": { "id": "n8n-sheet-guard-master", "name": "n8n-sheet-guard-master" } },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// 準備成功回應（無 Sheet 情況）\nconst prevData = $('Check User (No Sheets)').first().json;\n\nreturn [{\n  json: {\n    success: true,\n    data: {\n      message: '使用者資料已儲存',\n      userId: prevData.Line_UID,\n      spreadsheetIds: [],\n      parseErrors: prevData.parseErrors\n    },\n    error: null\n  }\n}];"
+      },
+      "id": "code-prepare-response-no-sheets",
+      "name": "Prepare Response (No Sheets)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1850, 400]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}"
+      },
+      "id": "respond-success-no-sheets",
+      "name": "Respond Success (No Sheets)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [2050, 400]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "validate-sheet",
+        "responseMode": "responseNode",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              { "name": "Access-Control-Allow-Origin", "value": "*" },
+              { "name": "Access-Control-Allow-Methods", "value": "POST, OPTIONS" },
+              { "name": "Access-Control-Allow-Headers", "value": "Content-Type" }
+            ]
+          }
+        }
+      },
+      "id": "webhook-validate-sheet",
+      "name": "Webhook Validate Sheet",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 700]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 解析並驗證 Google Sheet URL\nconst body = $input.first().json.body;\nconst url = body?.url || '';\n\n// 提取 spreadsheetId\nfunction extractSpreadsheetId(url) {\n  if (!url) return null;\n  const match = url.match(/\\/spreadsheets\\/d\\/([a-zA-Z0-9-_]+)/);\n  return match ? match[1] : null;\n}\n\nconst spreadsheetId = extractSpreadsheetId(url);\n\nif (!spreadsheetId) {\n  return [{\n    json: {\n      valid: false,\n      error: '無效的 Google Sheet URL 格式'\n    }\n  }];\n}\n\nreturn [{\n  json: {\n    spreadsheetId,\n    originalUrl: url\n  }\n}];"
+      },
+      "id": "code-parse-validate-url",
+      "name": "Parse & Validate URL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [450, 700]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "check-valid",
+              "leftValue": "={{ $json.spreadsheetId }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "notEmpty" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "if-url-valid",
+      "name": "URL Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [650, 700]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://sheets.googleapis.com/v4/spreadsheets/{{ $json.spreadsheetId }}?fields=properties.title,sheets.properties.title",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "options": {
+          "response": { "response": { "fullResponse": true } }
+        }
+      },
+      "id": "http-validate-sheet",
+      "name": "Validate Sheet Access",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [850, 650],
+      "credentials": { "googleSheetsOAuth2Api": { "id": "n8n-sheet-guard-master", "name": "n8n-sheet-guard-master" } },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// 處理 Google API 回應\nconst response = $input.first().json;\nconst prevData = $('Parse & Validate URL').first().json;\n\n// 檢查是否有錯誤\nif (response.error || !response.body || response.statusCode >= 400) {\n  let errorMsg = '無法存取此表單';\n  \n  if (response.statusCode === 403) {\n    errorMsg = '無法存取此表單，請確認已設定「知道連結的人都可以檢視」';\n  } else if (response.statusCode === 404) {\n    errorMsg = '找不到此表單，請確認網址正確';\n  } else if (response.error?.message) {\n    errorMsg = response.error.message;\n  }\n  \n  return [{\n    json: {\n      success: false,\n      error: errorMsg\n    }\n  }];\n}\n\n// 成功取得表單資訊\nconst title = response.body.properties?.title || '未命名表單';\nconst sheets = response.body.sheets || [];\nconst tabCount = sheets.length;\n\nreturn [{\n  json: {\n    success: true,\n    data: {\n      valid: true,\n      spreadsheetId: prevData.spreadsheetId,\n      title: title,\n      tabCount: tabCount\n    }\n  }\n}];"
+      },
+      "id": "code-format-validate-result",
+      "name": "Format Validation Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1050, 650]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}"
+      },
+      "id": "respond-validate-success",
+      "name": "Respond Validation",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1250, 650]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: false, error: $json.error || '無效的 Google Sheet URL 格式' }) }}"
+      },
+      "id": "respond-validate-error",
+      "name": "Respond Validation Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [850, 800]
+    },
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "reminder-settings",
+        "responseMode": "responseNode",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              { "name": "Access-Control-Allow-Origin", "value": "*" }
+            ]
+          }
+        }
+      },
+      "id": "webhook-reminder-get",
+      "name": "Webhook Reminder GET",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 1100]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "mode": "id", "value": "1Nn3tyYmGxioF6p_4i9vc6ABCn0NnsJu72FHC_Xlozxg" },
+        "sheetName": { "__rl": true, "mode": "name", "value": "Master_Sync" },
+        "filters": {
+          "conditions": [
+            { "lookupColumn": "Line_UID", "lookupValue": "={{ $json.query.userId }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "sheets-get-reminder",
+      "name": "Get User for Reminder",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [450, 1100],
+      "credentials": { "googleSheetsOAuth2Api": { "id": "n8n-sheet-guard-master", "name": "n8n-sheet-guard-master" } }
+    },
+    {
+      "parameters": {
+        "jsCode": "// 格式化提醒設定回應\nconst data = $input.all();\n\nif (data.length === 0 || !data[0].json.Line_UID) {\n  return [{ json: { success: false, error: '使用者不存在，請先完成註冊' } }];\n}\n\nconst user = data[0].json;\n\n// 解析 Reminder_Times\nlet times = [];\ntry {\n  if (user.Reminder_Times) {\n    times = JSON.parse(user.Reminder_Times);\n  }\n} catch (e) {\n  times = [];\n}\n\n// 解析 Reminder_Enabled\nconst enabled = user.Reminder_Enabled === 'TRUE' || user.Reminder_Enabled === true;\n\nreturn [{\n  json: {\n    success: true,\n    data: {\n      enabled: enabled,\n      times: times\n    }\n  }\n}];"
+      },
+      "id": "code-format-reminder",
+      "name": "Format Reminder Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [650, 1100]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}"
+      },
+      "id": "respond-reminder-get",
+      "name": "Respond Reminder GET",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [850, 1100]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "reminder-settings",
+        "responseMode": "responseNode",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              { "name": "Access-Control-Allow-Origin", "value": "*" },
+              { "name": "Access-Control-Allow-Methods", "value": "POST, OPTIONS" },
+              { "name": "Access-Control-Allow-Headers", "value": "Content-Type" }
+            ]
+          }
+        }
+      },
+      "id": "webhook-reminder-post",
+      "name": "Webhook Reminder POST",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 1300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 驗證提醒設定資料\nconst body = $input.first().json.body;\n\nconst userId = body?.userId;\nconst enabled = body?.enabled;\nconst times = body?.times || [];\n\n// 驗證 userId\nif (!userId) {\n  return [{ json: { valid: false, error: '缺少必要欄位: userId' } }];\n}\n\n// 驗證 times 數量\nif (times.length > 3) {\n  return [{ json: { valid: false, error: '最多只能設定 3 個提醒時間' } }];\n}\n\n// 驗證每個時間格式 (HH:00)\nconst validTimePattern = /^([01]?[0-9]|2[0-3]):00$/;\nfor (const t of times) {\n  if (!validTimePattern.test(t)) {\n    return [{ json: { valid: false, error: `時間格式錯誤: ${t}，請使用整點格式如 09:00` } }];\n  }\n}\n\n// 標準化時間格式 (確保是 HH:00)\nconst normalizedTimes = times.map(t => {\n  const hour = parseInt(t.split(':')[0], 10);\n  return hour.toString().padStart(2, '0') + ':00';\n});\n\nreturn [{\n  json: {\n    valid: true,\n    userId,\n    enabled: enabled === true || enabled === 'true',\n    times: normalizedTimes,\n    timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19)\n  }\n}];"
+      },
+      "id": "code-validate-reminder",
+      "name": "Validate Reminder Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [450, 1300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "check-valid-reminder",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "if-reminder-valid",
+      "name": "Reminder Data Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [650, 1300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "mode": "id", "value": "1Nn3tyYmGxioF6p_4i9vc6ABCn0NnsJu72FHC_Xlozxg" },
+        "sheetName": { "__rl": true, "mode": "name", "value": "Master_Sync" },
+        "filters": {
+          "conditions": [
+            { "lookupColumn": "Line_UID", "lookupValue": "={{ $json.userId }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "sheets-find-user-reminder",
+      "name": "Find User for Reminder",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [850, 1250],
+      "credentials": { "googleSheetsOAuth2Api": { "id": "n8n-sheet-guard-master", "name": "n8n-sheet-guard-master" } },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// 檢查使用者是否存在（key 名稱與表單欄位一致）\nconst sheetResult = $input.all();\nconst prevData = $('Validate Reminder Data').first().json;\n\n// 檢查是否找到使用者\nconst matchedUser = sheetResult.find(item => item.json && item.json.Line_UID === prevData.userId);\n\nif (!matchedUser) {\n  return [{ json: { userExists: false, error: '使用者不存在，請先完成註冊' } }];\n}\n\nreturn [{\n  json: {\n    userExists: true,\n    Line_UID: prevData.userId,\n    Reminder_Enabled: prevData.enabled ? 'TRUE' : 'FALSE',\n    Reminder_Times: JSON.stringify(prevData.times),\n    Updated_At: prevData.timestamp\n  }\n}];"
+      },
+      "id": "code-check-user-reminder",
+      "name": "Check User Exists (Reminder)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1050, 1250]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "check-user-exists-reminder",
+              "leftValue": "={{ $json.userExists }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "if-user-exists-reminder",
+      "name": "User Exists? (Reminder)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1250, 1250]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": { "__rl": true, "mode": "id", "value": "1Nn3tyYmGxioF6p_4i9vc6ABCn0NnsJu72FHC_Xlozxg" },
+        "sheetName": { "__rl": true, "mode": "name", "value": "Master_Sync" },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": ["Line_UID"]
+        },
+        "options": { "cellFormat": "USER_ENTERED" }
+      },
+      "id": "sheets-update-reminder",
+      "name": "Update Reminder Settings",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1450, 1200],
+      "credentials": { "googleSheetsOAuth2Api": { "id": "n8n-sheet-guard-master", "name": "n8n-sheet-guard-master" } }
+    },
+    {
+      "parameters": {
+        "jsCode": "// 準備成功回應\nconst prevData = $('Check User Exists (Reminder)').first().json;\n\n// 解析回原始值\nconst enabled = prevData.Reminder_Enabled === 'TRUE';\nlet times = [];\ntry {\n  times = JSON.parse(prevData.Reminder_Times);\n} catch (e) {\n  times = [];\n}\n\nreturn [{\n  json: {\n    success: true,\n    data: {\n      message: '提醒設定已更新',\n      enabled: enabled,\n      times: times\n    }\n  }\n}];"
+      },
+      "id": "code-prepare-reminder-response",
+      "name": "Prepare Reminder Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1650, 1200]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}"
+      },
+      "id": "respond-reminder-success",
+      "name": "Respond Reminder Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1850, 1200]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: false, error: $json.error || '驗證失敗' }) }}",
+        "options": { "responseCode": 400 }
+      },
+      "id": "respond-reminder-error",
+      "name": "Respond Reminder Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [850, 1400]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: false, error: $json.error || '使用者不存在' }) }}",
+        "options": { "responseCode": 404 }
+      },
+      "id": "respond-reminder-user-not-found",
+      "name": "Respond User Not Found (Reminder)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1450, 1350]
     }
   ],
   "connections": {
@@ -239,22 +798,64 @@
       ]
     },
     "Parse Sheet URLs": {
+      "main": [[{ "node": "Has Sheets?", "type": "main", "index": 0 }]]
+    },
+    "Has Sheets?": {
+      "main": [
+        [{ "node": "Split Sheets", "type": "main", "index": 0 }],
+        [{ "node": "Check User Exists (No Sheets)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Split Sheets": {
+      "main": [[{ "node": "Get Sheet Title", "type": "main", "index": 0 }]]
+    },
+    "Get Sheet Title": {
+      "main": [[{ "node": "Merge Sheet Titles", "type": "main", "index": 0 }]]
+    },
+    "Merge Sheet Titles": {
       "main": [[{ "node": "Check User Exists", "type": "main", "index": 0 }]]
     },
     "Check User Exists": {
+      "main": [[{ "node": "Check User & Prepare Data", "type": "main", "index": 0 }]]
+    },
+    "Check User & Prepare Data": {
       "main": [[{ "node": "User Exists?", "type": "main", "index": 0 }]]
     },
     "User Exists?": {
       "main": [
-        [{ "node": "Append New User", "type": "main", "index": 0 }],
-        [{ "node": "Update Existing User", "type": "main", "index": 0 }]
+        [{ "node": "Update Existing User", "type": "main", "index": 0 }],
+        [{ "node": "Append New User", "type": "main", "index": 0 }]
       ]
     },
     "Append New User": {
-      "main": [[{ "node": "Respond Success", "type": "main", "index": 0 }]]
+      "main": [[{ "node": "Prepare Response", "type": "main", "index": 0 }]]
     },
     "Update Existing User": {
+      "main": [[{ "node": "Prepare Response", "type": "main", "index": 0 }]]
+    },
+    "Prepare Response": {
       "main": [[{ "node": "Respond Success", "type": "main", "index": 0 }]]
+    },
+    "Check User Exists (No Sheets)": {
+      "main": [[{ "node": "Check User (No Sheets)", "type": "main", "index": 0 }]]
+    },
+    "Check User (No Sheets)": {
+      "main": [[{ "node": "User Exists? (No Sheets)", "type": "main", "index": 0 }]]
+    },
+    "User Exists? (No Sheets)": {
+      "main": [
+        [{ "node": "Update User (No Sheets)", "type": "main", "index": 0 }],
+        [{ "node": "Append New User (No Sheets)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Update User (No Sheets)": {
+      "main": [[{ "node": "Prepare Response (No Sheets)", "type": "main", "index": 0 }]]
+    },
+    "Append New User (No Sheets)": {
+      "main": [[{ "node": "Prepare Response (No Sheets)", "type": "main", "index": 0 }]]
+    },
+    "Prepare Response (No Sheets)": {
+      "main": [[{ "node": "Respond Success (No Sheets)", "type": "main", "index": 0 }]]
     },
     "Webhook Profile": {
       "main": [[{ "node": "Get User Profile", "type": "main", "index": 0 }]]
@@ -264,11 +865,77 @@
     },
     "Format Profile Response": {
       "main": [[{ "node": "Respond Profile", "type": "main", "index": 0 }]]
+    },
+    "Webhook Available Sheets": {
+      "main": [[{ "node": "Get All Users", "type": "main", "index": 0 }]]
+    },
+    "Get All Users": {
+      "main": [[{ "node": "Collect All Sheets", "type": "main", "index": 0 }]]
+    },
+    "Collect All Sheets": {
+      "main": [[{ "node": "Respond Available Sheets", "type": "main", "index": 0 }]]
+    },
+    "Webhook Validate Sheet": {
+      "main": [[{ "node": "Parse & Validate URL", "type": "main", "index": 0 }]]
+    },
+    "Parse & Validate URL": {
+      "main": [[{ "node": "URL Valid?", "type": "main", "index": 0 }]]
+    },
+    "URL Valid?": {
+      "main": [
+        [{ "node": "Validate Sheet Access", "type": "main", "index": 0 }],
+        [{ "node": "Respond Validation Error", "type": "main", "index": 0 }]
+      ]
+    },
+    "Validate Sheet Access": {
+      "main": [[{ "node": "Format Validation Result", "type": "main", "index": 0 }]]
+    },
+    "Format Validation Result": {
+      "main": [[{ "node": "Respond Validation", "type": "main", "index": 0 }]]
+    },
+    "Webhook Reminder GET": {
+      "main": [[{ "node": "Get User for Reminder", "type": "main", "index": 0 }]]
+    },
+    "Get User for Reminder": {
+      "main": [[{ "node": "Format Reminder Response", "type": "main", "index": 0 }]]
+    },
+    "Format Reminder Response": {
+      "main": [[{ "node": "Respond Reminder GET", "type": "main", "index": 0 }]]
+    },
+    "Webhook Reminder POST": {
+      "main": [[{ "node": "Validate Reminder Data", "type": "main", "index": 0 }]]
+    },
+    "Validate Reminder Data": {
+      "main": [[{ "node": "Reminder Data Valid?", "type": "main", "index": 0 }]]
+    },
+    "Reminder Data Valid?": {
+      "main": [
+        [{ "node": "Find User for Reminder", "type": "main", "index": 0 }],
+        [{ "node": "Respond Reminder Error", "type": "main", "index": 0 }]
+      ]
+    },
+    "Find User for Reminder": {
+      "main": [[{ "node": "Check User Exists (Reminder)", "type": "main", "index": 0 }]]
+    },
+    "Check User Exists (Reminder)": {
+      "main": [[{ "node": "User Exists? (Reminder)", "type": "main", "index": 0 }]]
+    },
+    "User Exists? (Reminder)": {
+      "main": [
+        [{ "node": "Update Reminder Settings", "type": "main", "index": 0 }],
+        [{ "node": "Respond User Not Found (Reminder)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Update Reminder Settings": {
+      "main": [[{ "node": "Prepare Reminder Response", "type": "main", "index": 0 }]]
+    },
+    "Prepare Reminder Response": {
+      "main": [[{ "node": "Respond Reminder Success", "type": "main", "index": 0 }]]
     }
   },
   "settings": { "executionOrder": "v1" },
   "staticData": null,
   "tags": [],
-  "triggerCount": 2,
+  "triggerCount": 6,
   "pinData": {}
 }

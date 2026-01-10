@@ -1,0 +1,36 @@
+# Vercel
+.vercel
+
+# Environment files
+.env
+.env*.local
+*.local
+
+# Dependencies
+node_modules/
+
+# Build outputs
+frontend/dist/
+dist/
+
+# IDE & Editor
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+.DS_Store
+
+# Tool configs (local only)
+.antigravity/
+.claude/
+
+# Example files
+example*.xlsx
+*.xlsx
+
+# Logs
+*.log
+npm-debug.log*

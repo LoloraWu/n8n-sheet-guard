@@ -1,0 +1,682 @@
+{
+  "name": "Workflow D - LINE Bot Commands",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "line-webhook",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "webhook-line",
+      "name": "LINE Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "line-bot-webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 解析 LINE Webhook 事件\nconst body = $input.first().json.body;\nconst defaultResponse = { status: 'ok' };\n\nif (!body || !body.events || body.events.length === 0) {\n  return [{ json: { ...defaultResponse, action: 'skip', reason: 'No events' } }];\n}\n\nconst event = body.events[0];\n\n// 只處理文字訊息\nif (event.type !== 'message' || event.message.type !== 'text') {\n  return [{ json: { ...defaultResponse, action: 'skip', reason: 'Not a text message' } }];\n}\n\nconst text = event.message.text.trim();\nconst userId = event.source.userId;\nconst replyToken = event.replyToken;\n\n// 判斷是否為指令或 YES 確認\nconst isCommand = text.startsWith('/');\nconst isYesConfirm = text.toUpperCase() === 'YES';\n\nif (!isCommand && !isYesConfirm) {\n  return [{ json: { ...defaultResponse, action: 'skip', reason: 'Not a command' } }];\n}\n\n// 解析指令和參數\nconst parts = text.split(/\\s+/);\nconst command = isCommand ? parts[0].toLowerCase() : 'yes-confirm';\nconst args = parts.slice(1);\n\n// 管理者白名單\nconst ADMIN_USER_IDS = ['U9db30529ea43839f12dfc20588d3a421'];\nconst isAdmin = ADMIN_USER_IDS.includes(userId);\n\n// 非管理者不能使用任何指令\nif (!isAdmin) {\n  return [{\n    json: {\n      ...defaultResponse,\n      action: 'process',\n      userId,\n      replyToken,\n      command,\n      args,\n      isAdmin,\n      rawText: text,\n      route: 'not-authorized'\n    }\n  }];\n}\n\n// 路由決定（僅管理者）\nlet route = 'unknown';\nif (command === '/my-status') route = 'my-status';\nelse if (command === '/clear-me') route = 'clear-me';\nelse if (command === '/help') route = 'help';\nelse if (command === 'yes-confirm') route = 'yes-confirm';\nelse if (command === '/list-usr') route = 'list-usr';\nelse if (command === '/check-usr') route = 'check-usr';\nelse if (command === '/del-usr') route = 'del-usr';\nelse if (command === '/clear-all') route = 'clear-all';\n\nreturn [{\n  json: {\n    ...defaultResponse,\n    action: 'process',\n    userId,\n    replyToken,\n    command,\n    args,\n    isAdmin,\n    rawText: text,\n    route\n  }\n}];"
+      },
+      "id": "code-parse-message",
+      "name": "Parse Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            { "id": "check-process", "leftValue": "={{ $json.action }}", "rightValue": "process", "operator": { "type": "string", "operation": "equals" } }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "if-should-process",
+      "name": "Should Process?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            { "conditions": { "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" }, "conditions": [{ "leftValue": "={{ $json.route }}", "rightValue": "not-authorized", "operator": { "type": "string", "operation": "equals" } }], "combinator": "and" }, "outputKey": "not-authorized" },
+            { "conditions": { "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" }, "conditions": [{ "leftValue": "={{ $json.route }}", "rightValue": "my-status", "operator": { "type": "string", "operation": "equals" } }], "combinator": "and" }, "outputKey": "my-status" },
+            { "conditions": { "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" }, "conditions": [{ "leftValue": "={{ $json.route }}", "rightValue": "help", "operator": { "type": "string", "operation": "equals" } }], "combinator": "and" }, "outputKey": "help" },
+            { "conditions": { "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" }, "conditions": [{ "leftValue": "={{ $json.route }}", "rightValue": "clear-me", "operator": { "type": "string", "operation": "equals" } }], "combinator": "and" }, "outputKey": "clear-me" },
+            { "conditions": { "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" }, "conditions": [{ "leftValue": "={{ $json.route }}", "rightValue": "yes-confirm", "operator": { "type": "string", "operation": "equals" } }], "combinator": "and" }, "outputKey": "yes-confirm" },
+            { "conditions": { "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" }, "conditions": [{ "leftValue": "={{ $json.route }}", "rightValue": "list-usr", "operator": { "type": "string", "operation": "equals" } }], "combinator": "and" }, "outputKey": "list-usr" },
+            { "conditions": { "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" }, "conditions": [{ "leftValue": "={{ $json.route }}", "rightValue": "check-usr", "operator": { "type": "string", "operation": "equals" } }], "combinator": "and" }, "outputKey": "check-usr" },
+            { "conditions": { "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" }, "conditions": [{ "leftValue": "={{ $json.route }}", "rightValue": "del-usr", "operator": { "type": "string", "operation": "equals" } }], "combinator": "and" }, "outputKey": "del-usr" },
+            { "conditions": { "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" }, "conditions": [{ "leftValue": "={{ $json.route }}", "rightValue": "clear-all", "operator": { "type": "string", "operation": "equals" } }], "combinator": "and" }, "outputKey": "clear-all" }
+          ]
+        },
+        "options": { "fallbackOutput": "extra" }
+      },
+      "id": "switch-command",
+      "name": "Command Router",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "mode": "id", "value": "1Nn3tyYmGxioF6p_4i9vc6ABCn0NnsJu72FHC_Xlozxg" },
+        "sheetName": { "__rl": true, "mode": "name", "value": "Master_Sync" },
+        "filters": { "conditions": [{ "lookupColumn": "Line_UID", "lookupValue": "={{ $('Parse Message').item.json.userId }}" }] },
+        "options": {}
+      },
+      "id": "sheets-get-my-status",
+      "name": "Get My Status",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1100, 0],
+      "credentials": { "googleSheetsOAuth2Api": { "id": "n8n-sheet-guard-master", "name": "n8n-sheet-guard-master" } },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// /my-status 回覆\nconst data = $input.all();\nconst parsed = $('Parse Message').first().json;\n\nlet message = '';\nif (data.length === 0 || !data[0].json.Line_UID) {\n  message = '❌ 你尚未註冊。\\n請前往設定頁面完成註冊。';\n} else {\n  const user = data[0].json;\n  const realName = user.Real_Name || '（未設定）';\n  const aliases = user.Aliases || '（無）';\n  \n  let sheets = '（無）';\n  try {\n    if (user.Sheet_Urls_JSON) {\n      const sheetList = JSON.parse(user.Sheet_Urls_JSON);\n      if (sheetList.length > 0) {\n        sheets = sheetList.map(s => '• ' + s.name).join('\\n');\n      }\n    }\n  } catch (e) {}\n  \n  message = '📋 你的註冊資料\\n\\n姓名：' + realName + '\\n別名：' + aliases + '\\n\\n關注報表：\\n' + sheets;\n}\n\nreturn [{ json: { replyToken: parsed.replyToken, message } }];"
+      },
+      "id": "code-format-my-status",
+      "name": "Format My Status",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1300, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// /help 回覆（僅管理者可用）\nconst parsed = $('Parse Message').first().json;\n\nlet message = '👑 管理者指令：\\n\\n';\nmessage += '/my-status - 查看你的註冊資料\\n';\nmessage += '/clear-me - 清空你的註冊資料\\n';\nmessage += '/help - 顯示此說明\\n';\nmessage += '/list-usr - 列出所有使用者\\n';\nmessage += '/check-usr {userId} - 查看特定使用者詳情\\n';\nmessage += '/del-usr {userId} - 刪除指定使用者\\n';\nmessage += '/clear-all - 清空所有資料';\n\nreturn [{ json: { replyToken: parsed.replyToken, message } }];"
+      },
+      "id": "code-help",
+      "name": "Format Help",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1100, 100]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": { "__rl": true, "mode": "id", "value": "1Nn3tyYmGxioF6p_4i9vc6ABCn0NnsJu72FHC_Xlozxg" },
+        "sheetName": { "__rl": true, "mode": "name", "value": "Pending_Confirmations" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "schema": [
+            { "id": "User_ID", "displayName": "User_ID", "required": false, "defaultMatch": true, "canBeUsedToMatch": true, "type": "string" },
+            { "id": "Action", "displayName": "Action", "required": false, "defaultMatch": false, "canBeUsedToMatch": false, "type": "string" },
+            { "id": "Timestamp", "displayName": "Timestamp", "required": false, "defaultMatch": false, "canBeUsedToMatch": false, "type": "string" }
+          ],
+          "value": {
+            "User_ID": "={{ $('Parse Message').item.json.userId }}",
+            "Action": "clear-me",
+            "Timestamp": "={{ Date.now() }}"
+          },
+          "matchingColumns": ["User_ID"]
+        },
+        "options": { "cellFormat": "USER_ENTERED" }
+      },
+      "id": "sheets-save-pending-clear-me",
+      "name": "Save Pending (clear-me)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1100, 200],
+      "credentials": { "googleSheetsOAuth2Api": { "id": "n8n-sheet-guard-master", "name": "n8n-sheet-guard-master" } }
+    },
+    {
+      "parameters": {
+        "jsCode": "// /clear-me - 回覆確認訊息\nconst parsed = $('Parse Message').first().json;\n\nconst message = '⚠️ 確定要清空你的所有註冊資料嗎？\\n\\n這會刪除：\\n• 真實姓名\\n• 所有別名\\n• 所有關注報表\\n\\n請在 5 分鐘內回覆 YES 確認';\n\nreturn [{ json: { replyToken: parsed.replyToken, message } }];"
+      },
+      "id": "code-clear-me-ask",
+      "name": "Clear Me - Ask Confirm",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1300, 200]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "mode": "id", "value": "1Nn3tyYmGxioF6p_4i9vc6ABCn0NnsJu72FHC_Xlozxg" },
+        "sheetName": { "__rl": true, "mode": "name", "value": "Pending_Confirmations" },
+        "filters": { "conditions": [{ "lookupColumn": "User_ID", "lookupValue": "={{ $('Parse Message').item.json.userId }}" }] },
+        "options": {}
+      },
+      "id": "sheets-get-pending",
+      "name": "Get Pending Confirmation",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1100, 300],
+      "credentials": { "googleSheetsOAuth2Api": { "id": "n8n-sheet-guard-master", "name": "n8n-sheet-guard-master" } },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// YES 確認處理 - 檢查待確認狀態\nconst data = $input.all();\nconst parsed = $('Parse Message').first().json;\n\n// 沒有待確認記錄\nif (data.length === 0 || !data[0].json.User_ID) {\n  return [{ json: { \n    replyToken: parsed.replyToken, \n    message: '❓ 沒有待確認的操作。\\n\\n如要清空資料，請先輸入 /clear-me',\n    action: 'none'\n  } }];\n}\n\nconst pending = data[0].json;\nconst timestamp = parseInt(pending.Timestamp);\nconst now = Date.now();\nconst fiveMinutes = 5 * 60 * 1000;\n\n// 檢查是否過期（5分鐘）\nif (now - timestamp > fiveMinutes) {\n  return [{ json: { \n    replyToken: parsed.replyToken, \n    message: '⏰ 確認已過期（超過 5 分鐘）。\\n\\n請重新輸入指令。',\n    action: 'expired',\n    pendingUserId: pending.User_ID\n  } }];\n}\n\n// 有效的待確認操作\nreturn [{ json: { \n  replyToken: parsed.replyToken,\n  action: pending.Action,\n  pendingUserId: pending.User_ID,\n  userId: parsed.userId\n} }];"
+      },
+      "id": "code-check-pending",
+      "name": "Check Pending Status",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1300, 300]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            { "conditions": { "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" }, "conditions": [{ "leftValue": "={{ $json.action }}", "rightValue": "clear-me", "operator": { "type": "string", "operation": "equals" } }], "combinator": "and" }, "outputKey": "clear-me" },
+            { "conditions": { "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" }, "conditions": [{ "leftValue": "={{ $json.action }}", "rightValue": "clear-all", "operator": { "type": "string", "operation": "equals" } }], "combinator": "and" }, "outputKey": "clear-all" }
+          ]
+        },
+        "options": { "fallbackOutput": "extra" }
+      },
+      "id": "switch-pending-action",
+      "name": "Route Pending Action",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [1500, 300]
+    },
+    {
+      "parameters": {
+        "operation": "delete",
+        "documentId": { "__rl": true, "mode": "id", "value": "1Nn3tyYmGxioF6p_4i9vc6ABCn0NnsJu72FHC_Xlozxg" },
+        "sheetName": { "__rl": true, "mode": "name", "value": "Master_Sync" },
+        "filters": { "conditions": [{ "lookupColumn": "Line_UID", "lookupValue": "={{ $('Check Pending Status').item.json.userId }}" }] },
+        "options": {}
+      },
+      "id": "sheets-exec-clear-me",
+      "name": "Execute Clear Me",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1700, 200],
+      "credentials": { "googleSheetsOAuth2Api": { "id": "n8n-sheet-guard-master", "name": "n8n-sheet-guard-master" } },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "operation": "delete",
+        "documentId": { "__rl": true, "mode": "id", "value": "1Nn3tyYmGxioF6p_4i9vc6ABCn0NnsJu72FHC_Xlozxg" },
+        "sheetName": { "__rl": true, "mode": "name", "value": "Pending_Confirmations" },
+        "filters": { "conditions": [{ "lookupColumn": "User_ID", "lookupValue": "={{ $('Check Pending Status').item.json.userId }}" }] },
+        "options": {}
+      },
+      "id": "sheets-delete-pending-clear-me",
+      "name": "Delete Pending (clear-me)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1900, 200],
+      "credentials": { "googleSheetsOAuth2Api": { "id": "n8n-sheet-guard-master", "name": "n8n-sheet-guard-master" } },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// clear-me 執行完成回覆\nconst replyToken = $('Check Pending Status').first().json.replyToken;\nconst message = '✅ 已清空你的所有註冊資料。';\n\nreturn [{ json: { replyToken, message } }];"
+      },
+      "id": "code-clear-me-done",
+      "name": "Clear Me Done",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2100, 200]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "mode": "id", "value": "1Nn3tyYmGxioF6p_4i9vc6ABCn0NnsJu72FHC_Xlozxg" },
+        "sheetName": { "__rl": true, "mode": "name", "value": "Master_Sync" },
+        "options": {}
+      },
+      "id": "sheets-get-all-for-clear",
+      "name": "Get All Users (clear-all)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1700, 350],
+      "credentials": { "googleSheetsOAuth2Api": { "id": "n8n-sheet-guard-master", "name": "n8n-sheet-guard-master" } },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// 刪除所有使用者 - 準備批次刪除\nconst users = $input.all().filter(item => item.json.Line_UID);\nconst replyToken = $('Check Pending Status').first().json.replyToken;\nconst userId = $('Check Pending Status').first().json.userId;\n\nif (users.length === 0) {\n  return [{ json: { replyToken, message: '📭 沒有需要清空的資料。', skipDelete: true } }];\n}\n\n// 輸出所有要刪除的 userId\nreturn users.map(u => ({ json: { \n  lineUid: u.json.Line_UID, \n  replyToken,\n  totalCount: users.length,\n  skipDelete: false\n} }));"
+      },
+      "id": "code-prepare-clear-all",
+      "name": "Prepare Clear All",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1900, 350]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [{ "id": "skip", "leftValue": "={{ $json.skipDelete }}", "rightValue": true, "operator": { "type": "boolean", "operation": "notEquals" } }],
+          "combinator": "and"
+        }
+      },
+      "id": "if-should-delete-all",
+      "name": "Should Delete?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2100, 350]
+    },
+    {
+      "parameters": {
+        "operation": "delete",
+        "documentId": { "__rl": true, "mode": "id", "value": "1Nn3tyYmGxioF6p_4i9vc6ABCn0NnsJu72FHC_Xlozxg" },
+        "sheetName": { "__rl": true, "mode": "name", "value": "Master_Sync" },
+        "filters": { "conditions": [{ "lookupColumn": "Line_UID", "lookupValue": "={{ $json.lineUid }}" }] },
+        "options": {}
+      },
+      "id": "sheets-delete-all-users",
+      "name": "Delete All Users",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [2300, 300],
+      "credentials": { "googleSheetsOAuth2Api": { "id": "n8n-sheet-guard-master", "name": "n8n-sheet-guard-master" } },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "operation": "delete",
+        "documentId": { "__rl": true, "mode": "id", "value": "1Nn3tyYmGxioF6p_4i9vc6ABCn0NnsJu72FHC_Xlozxg" },
+        "sheetName": { "__rl": true, "mode": "name", "value": "Pending_Confirmations" },
+        "filters": { "conditions": [{ "lookupColumn": "User_ID", "lookupValue": "={{ $('Check Pending Status').item.json.userId }}" }] },
+        "options": {}
+      },
+      "id": "sheets-delete-pending-clear-all",
+      "name": "Delete Pending (clear-all)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [2500, 300],
+      "credentials": { "googleSheetsOAuth2Api": { "id": "n8n-sheet-guard-master", "name": "n8n-sheet-guard-master" } },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// clear-all 執行完成回覆\nconst items = $input.all();\nconst replyToken = $('Check Pending Status').first().json.replyToken;\n\n// 取得總數（從任一 item）\nlet count = 0;\ntry {\n  const prepareItems = $('Prepare Clear All').all();\n  count = prepareItems[0]?.json?.totalCount || items.length;\n} catch(e) {\n  count = items.length;\n}\n\nconst message = '✅ 已清空所有使用者資料。\\n\\n共刪除 ' + count + ' 筆記錄。';\n\nreturn [{ json: { replyToken, message } }];"
+      },
+      "id": "code-clear-all-done",
+      "name": "Clear All Done",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2700, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// /list-usr - 檢查管理者權限\nconst parsed = $('Parse Message').first().json;\n\nif (!parsed.isAdmin) {\n  return [{ json: { replyToken: parsed.replyToken, message: '⛔ 你沒有權限執行此操作', authorized: false } }];\n}\n\nreturn [{ json: { authorized: true, replyToken: parsed.replyToken, userId: parsed.userId } }];"
+      },
+      "id": "code-check-admin-list",
+      "name": "Check Admin (list-usr)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1100, 500]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [{ "id": "auth", "leftValue": "={{ $json.authorized }}", "rightValue": true, "operator": { "type": "boolean", "operation": "equals" } }],
+          "combinator": "and"
+        }
+      },
+      "id": "if-admin-list-auth",
+      "name": "Admin Auth? (list)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1300, 500]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "mode": "id", "value": "1Nn3tyYmGxioF6p_4i9vc6ABCn0NnsJu72FHC_Xlozxg" },
+        "sheetName": { "__rl": true, "mode": "name", "value": "Master_Sync" },
+        "options": {}
+      },
+      "id": "sheets-get-all-users",
+      "name": "Get All Users (list)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1500, 450],
+      "credentials": { "googleSheetsOAuth2Api": { "id": "n8n-sheet-guard-master", "name": "n8n-sheet-guard-master" } },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// /list-usr 格式化\nconst users = $input.all().filter(item => item.json.Line_UID);\nconst replyToken = $('Check Admin (list-usr)').first().json.replyToken;\n\nif (users.length === 0) {\n  return [{ json: { replyToken, message: '👥 目前沒有已註冊的使用者' } }];\n}\n\nlet list = users.map((item, idx) => {\n  const u = item.json;\n  const name = u.Real_Name || '（未命名）';\n  const uid = u.Line_UID.substring(0, 10) + '...';\n  let sheetCount = 0;\n  try {\n    if (u.Sheet_Urls_JSON) {\n      sheetCount = JSON.parse(u.Sheet_Urls_JSON).length;\n    }\n  } catch (e) {}\n  return (idx + 1) + '. ' + name + ' (' + uid + ') - ' + sheetCount + ' 個報表';\n}).join('\\n');\n\nconst message = '👥 已註冊使用者（共 ' + users.length + ' 人）\\n\\n' + list;\n\nreturn [{ json: { replyToken, message } }];"
+      },
+      "id": "code-format-list-usr",
+      "name": "Format list-usr",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1700, 450]
+    },
+    {
+      "parameters": {
+        "jsCode": "// /check-usr - 檢查管理者權限和參數\nconst parsed = $('Parse Message').first().json;\n\nif (!parsed.isAdmin) {\n  return [{ json: { replyToken: parsed.replyToken, message: '⛔ 你沒有權限執行此操作', authorized: false } }];\n}\n\nif (!parsed.args || parsed.args.length === 0) {\n  return [{ json: { replyToken: parsed.replyToken, message: '❌ 請提供使用者 ID\\n\\n格式：/check-usr {userId}', authorized: false } }];\n}\n\nconst targetUserId = parsed.args[0];\n\nreturn [{ json: { authorized: true, replyToken: parsed.replyToken, targetUserId } }];"
+      },
+      "id": "code-check-admin-check-usr",
+      "name": "Check Admin (check-usr)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1100, 600]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [{ "id": "auth", "leftValue": "={{ $json.authorized }}", "rightValue": true, "operator": { "type": "boolean", "operation": "equals" } }],
+          "combinator": "and"
+        }
+      },
+      "id": "if-admin-check-usr-auth",
+      "name": "Admin Auth? (check)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1300, 600]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "mode": "id", "value": "1Nn3tyYmGxioF6p_4i9vc6ABCn0NnsJu72FHC_Xlozxg" },
+        "sheetName": { "__rl": true, "mode": "name", "value": "Master_Sync" },
+        "filters": { "conditions": [{ "lookupColumn": "Line_UID", "lookupValue": "={{ $('Check Admin (check-usr)').item.json.targetUserId }}" }] },
+        "options": {}
+      },
+      "id": "sheets-get-target-user",
+      "name": "Get Target User (check)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1500, 550],
+      "credentials": { "googleSheetsOAuth2Api": { "id": "n8n-sheet-guard-master", "name": "n8n-sheet-guard-master" } },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// /check-usr 格式化詳情\nconst data = $input.all();\nconst replyToken = $('Check Admin (check-usr)').first().json.replyToken;\nconst targetUserId = $('Check Admin (check-usr)').first().json.targetUserId;\n\nif (data.length === 0 || !data[0].json.Line_UID) {\n  return [{ json: { replyToken, message: '❌ 找不到使用者：' + targetUserId } }];\n}\n\nconst user = data[0].json;\nconst realName = user.Real_Name || '（未設定）';\nconst aliases = user.Aliases || '（無）';\nconst createdAt = user.Created_At || '（未知）';\nconst updatedAt = user.Updated_At || '（未知）';\n\nlet sheets = '（無）';\ntry {\n  if (user.Sheet_Urls_JSON) {\n    const sheetList = JSON.parse(user.Sheet_Urls_JSON);\n    if (sheetList.length > 0) {\n      sheets = sheetList.map(s => '• ' + s.name).join('\\n');\n    }\n  }\n} catch (e) {}\n\nlet message = '📋 使用者詳情\\n\\n';\nmessage += '姓名：' + realName + '\\n';\nmessage += '別名：' + aliases + '\\n\\n';\nmessage += '關注報表：\\n' + sheets + '\\n\\n';\nmessage += '註冊時間：' + createdAt + '\\n';\nmessage += '最後更新：' + updatedAt + '\\n\\n';\nmessage += 'User ID：\\n' + user.Line_UID;\n\nreturn [{ json: { replyToken, message } }];"
+      },
+      "id": "code-format-check-usr",
+      "name": "Format check-usr",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1700, 550]
+    },
+    {
+      "parameters": {
+        "jsCode": "// /del-usr - 檢查管理者權限和參數\nconst parsed = $('Parse Message').first().json;\n\nif (!parsed.isAdmin) {\n  return [{ json: { replyToken: parsed.replyToken, message: '⛔ 你沒有權限執行此操作', authorized: false } }];\n}\n\nif (!parsed.args || parsed.args.length === 0) {\n  return [{ json: { replyToken: parsed.replyToken, message: '❌ 請提供使用者 ID\\n\\n格式：/del-usr {userId}', authorized: false } }];\n}\n\nconst targetUserId = parsed.args[0];\n\nreturn [{ json: { authorized: true, replyToken: parsed.replyToken, targetUserId } }];"
+      },
+      "id": "code-check-admin-del-usr",
+      "name": "Check Admin (del-usr)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1100, 700]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [{ "id": "auth", "leftValue": "={{ $json.authorized }}", "rightValue": true, "operator": { "type": "boolean", "operation": "equals" } }],
+          "combinator": "and"
+        }
+      },
+      "id": "if-admin-del-usr-auth",
+      "name": "Admin Auth? (del)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1300, 700]
+    },
+    {
+      "parameters": {
+        "operation": "delete",
+        "documentId": { "__rl": true, "mode": "id", "value": "1Nn3tyYmGxioF6p_4i9vc6ABCn0NnsJu72FHC_Xlozxg" },
+        "sheetName": { "__rl": true, "mode": "name", "value": "Master_Sync" },
+        "filters": { "conditions": [{ "lookupColumn": "Line_UID", "lookupValue": "={{ $('Check Admin (del-usr)').item.json.targetUserId }}" }] },
+        "options": {}
+      },
+      "id": "sheets-delete-user",
+      "name": "Delete User",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1500, 650],
+      "credentials": { "googleSheetsOAuth2Api": { "id": "n8n-sheet-guard-master", "name": "n8n-sheet-guard-master" } },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// /del-usr 回覆\nconst replyToken = $('Check Admin (del-usr)').first().json.replyToken;\nconst targetUserId = $('Check Admin (del-usr)').first().json.targetUserId;\n\nconst message = '✅ 已刪除使用者：' + targetUserId.substring(0, 10) + '...';\n\nreturn [{ json: { replyToken, message } }];"
+      },
+      "id": "code-format-del-usr",
+      "name": "Format del-usr",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1700, 650]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": { "__rl": true, "mode": "id", "value": "1Nn3tyYmGxioF6p_4i9vc6ABCn0NnsJu72FHC_Xlozxg" },
+        "sheetName": { "__rl": true, "mode": "name", "value": "Pending_Confirmations" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "schema": [
+            { "id": "User_ID", "displayName": "User_ID", "required": false, "defaultMatch": true, "canBeUsedToMatch": true, "type": "string" },
+            { "id": "Action", "displayName": "Action", "required": false, "defaultMatch": false, "canBeUsedToMatch": false, "type": "string" },
+            { "id": "Timestamp", "displayName": "Timestamp", "required": false, "defaultMatch": false, "canBeUsedToMatch": false, "type": "string" }
+          ],
+          "value": {
+            "User_ID": "={{ $('Parse Message').item.json.userId }}",
+            "Action": "clear-all",
+            "Timestamp": "={{ Date.now() }}"
+          },
+          "matchingColumns": ["User_ID"]
+        },
+        "options": { "cellFormat": "USER_ENTERED" }
+      },
+      "id": "sheets-save-pending-clear-all",
+      "name": "Save Pending (clear-all)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1100, 800],
+      "credentials": { "googleSheetsOAuth2Api": { "id": "n8n-sheet-guard-master", "name": "n8n-sheet-guard-master" } }
+    },
+    {
+      "parameters": {
+        "jsCode": "// /clear-all - 回覆確認訊息\nconst parsed = $('Parse Message').first().json;\n\nconst message = '⚠️ 確定要清空所有使用者資料嗎？\\n\\n這是不可逆的操作！\\n\\n請在 5 分鐘內回覆 YES 確認';\n\nreturn [{ json: { replyToken: parsed.replyToken, message } }];"
+      },
+      "id": "code-clear-all-ask",
+      "name": "Clear All - Ask Confirm",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1300, 800]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 未知指令回覆\nconst parsed = $('Parse Message').first().json;\nconst message = '❓ 未知指令：' + parsed.command + '\\n\\n輸入 /help 查看可用指令';\n\nreturn [{ json: { replyToken: parsed.replyToken, message } }];"
+      },
+      "id": "code-unknown",
+      "name": "Unknown Command",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1100, 900]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 非管理者嘗試使用指令\nconst parsed = $('Parse Message').first().json;\n\nconst message = '請使用選單中的「設定」功能來管理您的資料。';\n\nreturn [{ json: { replyToken: parsed.replyToken, message } }];"
+      },
+      "id": "code-not-authorized",
+      "name": "Not Authorized",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1100, -100]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.line.me/v2/bot/message/reply",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "Content-Type", "value": "application/json" }] },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ replyToken: $json.replyToken, messages: [{ type: 'text', text: $json.message }] }) }}",
+        "options": {}
+      },
+      "id": "http-line-reply",
+      "name": "LINE Reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2950, 500],
+      "credentials": { "httpHeaderAuth": { "id": "line-channel-token", "name": "LINE Channel Token" } }
+    }
+  ],
+  "connections": {
+    "LINE Webhook": {
+      "main": [[{ "node": "Parse Message", "type": "main", "index": 0 }]]
+    },
+    "Parse Message": {
+      "main": [[{ "node": "Should Process?", "type": "main", "index": 0 }]]
+    },
+    "Should Process?": {
+      "main": [
+        [{ "node": "Command Router", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Command Router": {
+      "main": [
+        [{ "node": "Not Authorized", "type": "main", "index": 0 }],
+        [{ "node": "Get My Status", "type": "main", "index": 0 }],
+        [{ "node": "Format Help", "type": "main", "index": 0 }],
+        [{ "node": "Save Pending (clear-me)", "type": "main", "index": 0 }],
+        [{ "node": "Get Pending Confirmation", "type": "main", "index": 0 }],
+        [{ "node": "Check Admin (list-usr)", "type": "main", "index": 0 }],
+        [{ "node": "Check Admin (check-usr)", "type": "main", "index": 0 }],
+        [{ "node": "Check Admin (del-usr)", "type": "main", "index": 0 }],
+        [{ "node": "Save Pending (clear-all)", "type": "main", "index": 0 }],
+        [{ "node": "Unknown Command", "type": "main", "index": 0 }]
+      ]
+    },
+    "Not Authorized": {
+      "main": [[{ "node": "LINE Reply", "type": "main", "index": 0 }]]
+    },
+    "Get My Status": {
+      "main": [[{ "node": "Format My Status", "type": "main", "index": 0 }]]
+    },
+    "Format My Status": {
+      "main": [[{ "node": "LINE Reply", "type": "main", "index": 0 }]]
+    },
+    "Format Help": {
+      "main": [[{ "node": "LINE Reply", "type": "main", "index": 0 }]]
+    },
+    "Save Pending (clear-me)": {
+      "main": [[{ "node": "Clear Me - Ask Confirm", "type": "main", "index": 0 }]]
+    },
+    "Clear Me - Ask Confirm": {
+      "main": [[{ "node": "LINE Reply", "type": "main", "index": 0 }]]
+    },
+    "Get Pending Confirmation": {
+      "main": [[{ "node": "Check Pending Status", "type": "main", "index": 0 }]]
+    },
+    "Check Pending Status": {
+      "main": [[{ "node": "Route Pending Action", "type": "main", "index": 0 }]]
+    },
+    "Route Pending Action": {
+      "main": [
+        [{ "node": "Execute Clear Me", "type": "main", "index": 0 }],
+        [{ "node": "Get All Users (clear-all)", "type": "main", "index": 0 }],
+        [{ "node": "LINE Reply", "type": "main", "index": 0 }]
+      ]
+    },
+    "Execute Clear Me": {
+      "main": [[{ "node": "Delete Pending (clear-me)", "type": "main", "index": 0 }]]
+    },
+    "Delete Pending (clear-me)": {
+      "main": [[{ "node": "Clear Me Done", "type": "main", "index": 0 }]]
+    },
+    "Clear Me Done": {
+      "main": [[{ "node": "LINE Reply", "type": "main", "index": 0 }]]
+    },
+    "Get All Users (clear-all)": {
+      "main": [[{ "node": "Prepare Clear All", "type": "main", "index": 0 }]]
+    },
+    "Prepare Clear All": {
+      "main": [[{ "node": "Should Delete?", "type": "main", "index": 0 }]]
+    },
+    "Should Delete?": {
+      "main": [
+        [{ "node": "Delete All Users", "type": "main", "index": 0 }],
+        [{ "node": "LINE Reply", "type": "main", "index": 0 }]
+      ]
+    },
+    "Delete All Users": {
+      "main": [[{ "node": "Delete Pending (clear-all)", "type": "main", "index": 0 }]]
+    },
+    "Delete Pending (clear-all)": {
+      "main": [[{ "node": "Clear All Done", "type": "main", "index": 0 }]]
+    },
+    "Clear All Done": {
+      "main": [[{ "node": "LINE Reply", "type": "main", "index": 0 }]]
+    },
+    "Check Admin (list-usr)": {
+      "main": [[{ "node": "Admin Auth? (list)", "type": "main", "index": 0 }]]
+    },
+    "Admin Auth? (list)": {
+      "main": [
+        [{ "node": "Get All Users (list)", "type": "main", "index": 0 }],
+        [{ "node": "LINE Reply", "type": "main", "index": 0 }]
+      ]
+    },
+    "Get All Users (list)": {
+      "main": [[{ "node": "Format list-usr", "type": "main", "index": 0 }]]
+    },
+    "Format list-usr": {
+      "main": [[{ "node": "LINE Reply", "type": "main", "index": 0 }]]
+    },
+    "Check Admin (check-usr)": {
+      "main": [[{ "node": "Admin Auth? (check)", "type": "main", "index": 0 }]]
+    },
+    "Admin Auth? (check)": {
+      "main": [
+        [{ "node": "Get Target User (check)", "type": "main", "index": 0 }],
+        [{ "node": "LINE Reply", "type": "main", "index": 0 }]
+      ]
+    },
+    "Get Target User (check)": {
+      "main": [[{ "node": "Format check-usr", "type": "main", "index": 0 }]]
+    },
+    "Format check-usr": {
+      "main": [[{ "node": "LINE Reply", "type": "main", "index": 0 }]]
+    },
+    "Check Admin (del-usr)": {
+      "main": [[{ "node": "Admin Auth? (del)", "type": "main", "index": 0 }]]
+    },
+    "Admin Auth? (del)": {
+      "main": [
+        [{ "node": "Delete User", "type": "main", "index": 0 }],
+        [{ "node": "LINE Reply", "type": "main", "index": 0 }]
+      ]
+    },
+    "Delete User": {
+      "main": [[{ "node": "Format del-usr", "type": "main", "index": 0 }]]
+    },
+    "Format del-usr": {
+      "main": [[{ "node": "LINE Reply", "type": "main", "index": 0 }]]
+    },
+    "Save Pending (clear-all)": {
+      "main": [[{ "node": "Clear All - Ask Confirm", "type": "main", "index": 0 }]]
+    },
+    "Clear All - Ask Confirm": {
+      "main": [[{ "node": "LINE Reply", "type": "main", "index": 0 }]]
+    },
+    "Unknown Command": {
+      "main": [[{ "node": "LINE Reply", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 1,
+  "pinData": {}
+}

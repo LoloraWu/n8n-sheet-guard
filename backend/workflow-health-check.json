@@ -4,7 +4,7 @@
     {
       "parameters": {
         "httpMethod": "GET",
-        "path": "api/health",
+        "path": "health",
         "options": {
           "responseHeaders": {
             "entries": [

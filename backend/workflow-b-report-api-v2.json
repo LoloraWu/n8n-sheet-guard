@@ -25,7 +25,7 @@
     {
       "parameters": {
         "operation": "read",
-        "documentId": { "__rl": true, "mode": "id", "value": "={{ $env.MASTER_SYNC_SHEET_ID }}" },
+        "documentId": { "__rl": true, "mode": "id", "value": "1Nn3tyYmGxioF6p_4i9vc6ABCn0NnsJu72FHC_Xlozxg" },
         "sheetName": { "__rl": true, "mode": "name", "value": "Master_Sync" },
         "filters": {
           "conditions": [
@@ -40,6 +40,16 @@
       "typeVersion": 4.5,
       "position": [450, 300],
       "credentials": { "googleSheetsOAuth2Api": { "id": "n8n-sheet-guard-master", "name": "n8n-sheet-guard-master" } }
+    },
+    {
+      "parameters": {
+        "jsCode": "// 手動過濾正確的用戶（因為 Google Sheets filter 可能沒生效）\nconst allUsers = $input.all();\nconst targetUserId = $('Webhook Report Status').first().json.query.userId;\n\nconst matchedUser = allUsers.find(item => item.json && item.json.Line_UID === targetUserId);\n\nif (matchedUser) {\n  return [matchedUser];\n} else {\n  return [{ json: { _notFound: true } }];\n}"
+      },
+      "id": "code-filter-user",
+      "name": "Filter User",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [650, 300]
     },
     {
       "parameters": {
@@ -76,7 +86,8 @@
       "parameters": {
         "method": "GET",
         "url": "=https://sheets.googleapis.com/v4/spreadsheets/{{ $json.spreadsheetId }}",
-        "authentication": "oAuth2",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
         "options": {
           "response": { "response": { "fullResponse": true } }
         }
@@ -103,7 +114,8 @@
       "parameters": {
         "method": "GET",
         "url": "=https://sheets.googleapis.com/v4/spreadsheets/{{ $json.spreadsheetId }}/values/{{ encodeURIComponent($json.tabName) }}!A1:AZ{{ $json.needsDegradedRead ? '10' : Math.min($json.rowCount, 500) }}",
-        "authentication": "oAuth2",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
         "options": {
           "response": { "response": { "fullResponse": true } }
         }
@@ -151,7 +163,8 @@
       "parameters": {
         "method": "GET",
         "url": "=https://sheets.googleapis.com/v4/spreadsheets/{{ $json.spreadsheetId }}/values/{{ encodeURIComponent($json.tabName) }}!A{{ Math.max(1, $json.rowCount - 200) }}:AZ{{ $json.rowCount }}",
-        "authentication": "oAuth2",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
         "options": {
           "response": { "response": { "fullResponse": true } }
         }
@@ -176,9 +189,7 @@
     },
     {
       "parameters": {
-        "mode": "combine",
-        "combineBy": "combineAll",
-        "options": {}
+        "mode": "append"
       },
       "id": "merge-data-paths",
       "name": "Merge Data Paths",
@@ -220,10 +231,10 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "=https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={{ $env.GEMINI_API_KEY }}",
+        "url": "=https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={{ AIzaSyCZ_Ali-k0f0fb8-2FfoPcBLrSRActDRW4 }}",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"contents\": [{\n    \"parts\": [{\n      \"text\": \"你是一位專業的 Google Sheet 結構分析師。分析表頭欄位，推斷每個欄位的語意用途。\\n\\n欄位分類：\\n- date: 日期欄（日期、Date、時間）\\n- name: 姓名欄（姓名、Name、負責人、LINE_ID、成員）\\n- category: 分類欄（分類、類別、Category）\\n- checkableHigh: 必填欄位，空白=未填寫（進度、狀態、留言、連結、完成、回報、內容）\\n- checkableAdvisory: 選填欄位，空白只提醒（備註、Note、補充）\\n- ignore: 忽略（序號、編號、ID、#）\\n\\n輸出純 JSON，格式：\\n{\\\"columns\\\":[{\\\"col\\\":\\\"A\\\",\\\"header\\\":\\\"日期\\\",\\\"semantic\\\":\\\"date\\\"},{\\\"col\\\":\\\"B\\\",\\\"header\\\":\\\"姓名\\\",\\\"semantic\\\":\\\"name\\\"}],\\\"summary\\\":{\\\"dateCol\\\":\\\"A\\\",\\\"nameCol\\\":\\\"B\\\",\\\"checkableHighCols\\\":[\\\"C\\\",\\\"D\\\"],\\\"checkableAdvisoryCols\\\":[\\\"E\\\"]}}\\n\\nTab: {{ $json.tabName }}\\n表頭: {{ JSON.stringify($json.headerRow) }}\\n\\n請分析並輸出 JSON。\"\n    }]\n  }],\n  \"generationConfig\": {\n    \"temperature\": 0.1,\n    \"maxOutputTokens\": 1000\n  }\n}",
+        "jsonBody": "={\n  \"contents\": [{\n    \"parts\": [{\n      \"text\": \"你是一位專業的 Google Sheet 結構分析師。分析表頭欄位，推斷每個欄位的語意用途。\\n\\n欄位分類：\\n- date: 日期欄（日期、Date、時間）\\n- name: 姓名/身份欄（姓名、Name、負責人、LINE ID、LINE_ID、暱稱、成員、帳號）\\n- category: 分類欄（分類、類別、Category）\\n- checkableHigh: 必填欄位，空白=未填寫（進度、狀態、留言、連結、文章連結、完成、回報、內容、標題）\\n- checkableAdvisory: 選填欄位，空白只提醒（備註、Note、補充）\\n- ignore: 忽略（序號、編號、ID、#）\\n\\n注意：\\n1. 如果第一列是大標題（如「XXX討論區」），表頭應該在第二列\\n2. nameCol 可以有多個（如姓名欄和 LINE ID 欄都算）\\n\\n輸出純 JSON，格式：\\n{\\\"columns\\\":[{\\\"col\\\":\\\"A\\\",\\\"header\\\":\\\"日期\\\",\\\"semantic\\\":\\\"date\\\"},{\\\"col\\\":\\\"B\\\",\\\"header\\\":\\\"姓名\\\",\\\"semantic\\\":\\\"name\\\"}],\\\"summary\\\":{\\\"dateCol\\\":\\\"B\\\",\\\"nameCols\\\":[\\\"E\\\",\\\"F\\\"],\\\"checkableHighCols\\\":[\\\"C\\\",\\\"D\\\"],\\\"checkableAdvisoryCols\\\":[]}}\\n\\nTab: {{ $json.tabName }}\\n表頭: {{ JSON.stringify($json.headerRow) }}\\n\\n請分析並輸出 JSON。\"\n    }]\n  }],\n  \"generationConfig\": {\n    \"temperature\": 0.1,\n    \"maxOutputTokens\": 1000\n  }\n}",
         "options": {}
       },
       "id": "gemini-schema-inference",
@@ -255,9 +266,7 @@
     },
     {
       "parameters": {
-        "mode": "combine",
-        "combineBy": "combineAll",
-        "options": {}
+        "mode": "append"
       },
       "id": "merge-schema-paths",
       "name": "Merge Schema Paths",
@@ -268,10 +277,10 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "=https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={{ $env.GEMINI_API_KEY }}",
+        "url": "=https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={{ AIzaSyCZ_Ali-k0f0fb8-2FfoPcBLrSRActDRW4 }}",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"contents\": [{\n    \"parts\": [{\n      \"text\": \"你是精準的資料查核員。檢查 Google Sheet 資料，判斷使用者今日是否有未填寫欄位。\\n\\n未填寫定義：空白、NA、N/A、n/a、待填、待填寫、-、--、純空格\\n已填寫定義：有任何實質內容\\n\\n流程：\\n1. 找「日期欄」= 今日的列\\n2. 找「姓名欄」與「別名」匹配的列\\n3. 檢查 checkableHigh 欄位是否未填寫\\n4. checkableAdvisory 欄位空白只列入 advisory，不算 missing\\n\\n輸出純 JSON：\\n{\\\"matchedRows\\\":[{\\\"row\\\":4,\\\"date\\\":\\\"2026/01/08\\\",\\\"name\\\":\\\"Sin\\\",\\\"missingFields\\\":[{\\\"col\\\":\\\"D\\\",\\\"header\\\":\\\"一般留言\\\",\\\"cell\\\":\\\"D4\\\"}],\\\"advisoryFields\\\":[{\\\"col\\\":\\\"F\\\",\\\"header\\\":\\\"備註\\\",\\\"cell\\\":\\\"F4\\\"}]}],\\\"summary\\\":{\\\"status\\\":\\\"missing\\\",\\\"totalMissing\\\":1,\\\"totalAdvisory\\\":1}}\\n\\nstatus: completed(無missing) / missing(有missing) / not_found(找不到今日+別名匹配)\\n\\n今日：{{ $now.format('YYYY/MM/DD') }}（也可能是 {{ $now.format('MM/DD') }} 或 {{ $now.format('M/D') }} 格式）\\n別名：{{ $json.aliases }}\\n\\nSchema：\\n{{ JSON.stringify($json.schema?.summary || {}) }}\\n\\n資料（前 500 列）：\\n{{ JSON.stringify(($json.tabData || []).slice(0, 500)) }}\\n\\n請檢查並輸出 JSON。\"\n    }]\n  }],\n  \"generationConfig\": {\n    \"temperature\": 0.1,\n    \"maxOutputTokens\": 2000\n  }\n}",
+        "jsonBody": "={\n  \"contents\": [{\n    \"parts\": [{\n      \"text\": \"你是精準的資料查核員。檢查 Google Sheet 資料，判斷使用者今日是否有未填寫欄位。\\n\\n未填寫定義：空白、NA、N/A、n/a、待填、待填寫、-、--、純空格\\n已填寫定義：有任何實質內容\\n\\n流程：\\n1. 找「日期欄」= 今日的列（注意：日期可能有多種格式）\\n2. 找「姓名欄」或「LINE ID」欄與「別名」匹配的列\\n3. 檢查 checkableHigh 欄位是否未填寫\\n4. checkableAdvisory 欄位空白只列入 advisory，不算 missing\\n\\n輸出純 JSON：\\n{\\\"matchedRows\\\":[{\\\"row\\\":4,\\\"date\\\":\\\"1月10日\\\",\\\"name\\\":\\\"Sin\\\",\\\"missingFields\\\":[{\\\"col\\\":\\\"D\\\",\\\"header\\\":\\\"文章連結\\\",\\\"cell\\\":\\\"D4\\\"}],\\\"advisoryFields\\\":[]}],\\\"summary\\\":{\\\"status\\\":\\\"missing\\\",\\\"totalMissing\\\":1,\\\"totalAdvisory\\\":0}}\\n\\nstatus: completed(無missing) / missing(有missing) / not_found(找不到今日+別名匹配)\\n\\n今日日期（請匹配任一格式）：\\n- {{ $now.format('YYYY/MM/DD') }}\\n- {{ $now.format('YYYY-MM-DD') }}\\n- {{ $now.format('MM/DD') }}\\n- {{ $now.format('M/D') }}\\n- {{ $now.format('M') }}月{{ $now.format('D') }}日\\n- {{ $now.format('MM') }}月{{ $now.format('DD') }}日\\n\\n別名（請在姓名欄或 LINE ID 欄匹配）：{{ $json.aliases }}\\n\\nSchema：\\n{{ JSON.stringify($json.schema?.summary || {}) }}\\n\\n資料（前 500 列）：\\n{{ JSON.stringify(($json.tabData || []).slice(0, 500)) }}\\n\\n請檢查並輸出 JSON。\"\n    }]\n  }],\n  \"generationConfig\": {\n    \"temperature\": 0.1,\n    \"maxOutputTokens\": 2000\n  }\n}",
         "options": {}
       },
       "id": "gemini-status-inference",
@@ -293,7 +302,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// 彙整所有 tab 的結果\nconst allItems = $input.all();\n\nconst allReports = [];\nconst allAdvisories = [];\nconst allWarnings = [];\nconst schemaUpdates = {};\n\nlet tabsScanned = 0;\nlet tabsWithErrors = 0;\n\nfor (const item of allItems) {\n  const data = item.json;\n  \n  // 如果有錯誤，記錄並跳過\n  if (data.error) {\n    tabsWithErrors++;\n    allWarnings.push({\n      sheetTitle: data.sheetInfo?.name || '未知報表',\n      tabName: '',\n      message: data.errorMessage\n    });\n    continue;\n  }\n  \n  tabsScanned++;\n  \n  // 收集 reports\n  if (data.reports) {\n    allReports.push(...data.reports);\n  }\n  \n  // 收集 advisories\n  if (data.advisories) {\n    allAdvisories.push(...data.advisories);\n  }\n  \n  // 收集 warnings\n  if (data.warnings) {\n    allWarnings.push(...data.warnings);\n  }\n  \n  // 收集需要更新的 schema（只有 AI 推斷的才需要更新）\n  if (data.schemaSource === 'gemini-inferred' && data.schema && data.cacheKey) {\n    schemaUpdates[data.cacheKey] = data.schema;\n  }\n}\n\nconst missingCount = allReports.length;\nconst completedCount = tabsScanned - (missingCount > 0 ? 1 : 0); // 簡化計算\n\nreturn [{\n  json: {\n    success: true,\n    data: {\n      summary: {\n        total: tabsScanned,\n        missing: missingCount,\n        completed: completedCount,\n        allCompleted: missingCount === 0,\n        tabsScanned,\n        tabsWithErrors\n      },\n      reports: allReports,\n      advisories: allAdvisories,\n      warnings: allWarnings\n    },\n    error: null,\n    _schemaUpdates: schemaUpdates\n  }\n}];"
+        "jsCode": "// 彙整所有 tab 的結果\nconst allItems = $input.all();\n\nconst allReports = [];\nconst allAdvisories = [];\nconst allWarnings = [];\nconst schemaUpdates = {};\n\nlet tabsScanned = 0;\nlet tabsWithErrors = 0;\nlet userId = null;\n\nfor (const item of allItems) {\n  const data = item.json;\n  \n  // 取得 userId（用於更新 Last_Check_Time）\n  if (data.userId && !userId) {\n    userId = data.userId;\n  }\n  \n  // 如果有錯誤，記錄並跳過\n  if (data.error) {\n    tabsWithErrors++;\n    allWarnings.push({\n      sheetTitle: data.sheetInfo?.name || '未知報表',\n      tabName: '',\n      message: data.errorMessage\n    });\n    continue;\n  }\n  \n  tabsScanned++;\n  \n  // 收集 reports\n  if (data.reports) {\n    allReports.push(...data.reports);\n  }\n  \n  // 收集 advisories\n  if (data.advisories) {\n    allAdvisories.push(...data.advisories);\n  }\n  \n  // 收集 warnings\n  if (data.warnings) {\n    allWarnings.push(...data.warnings);\n  }\n  \n  // 收集需要更新的 schema（只有 AI 推斷的才需要更新）\n  if (data.schemaSource === 'gemini-inferred' && data.schema && data.cacheKey) {\n    schemaUpdates[data.cacheKey] = data.schema;\n  }\n}\n\nconst missingCount = allReports.length;\nconst completedCount = tabsScanned - (missingCount > 0 ? 1 : 0); // 簡化計算\nconst lastCheckTime = new Date().toISOString();\n\nreturn [{\n  json: {\n    success: true,\n    data: {\n      summary: {\n        total: tabsScanned,\n        missing: missingCount,\n        completed: completedCount,\n        allCompleted: missingCount === 0,\n        tabsScanned,\n        tabsWithErrors\n      },\n      reports: allReports,\n      advisories: allAdvisories,\n      warnings: allWarnings,\n      lastCheckTime: lastCheckTime\n    },\n    error: null,\n    _schemaUpdates: schemaUpdates,\n    _userId: userId,\n    _lastCheckTime: lastCheckTime\n  }\n}];"
       },
       "id": "code-aggregate-all",
       "name": "Aggregate All Results",
@@ -314,6 +323,25 @@
     },
     {
       "parameters": {
+        "method": "PUT",
+        "url": "=https://sheets.googleapis.com/v4/spreadsheets/{{ $env.MASTER_SYNC_SHEET_ID }}/values/Master_Sync!I:I?valueInputOption=USER_ENTERED",
+        "authentication": "oAuth2",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"range\": \"Master_Sync!I:I\",\n  \"values\": []\n}",
+        "options": {}
+      },
+      "id": "update-last-check-placeholder",
+      "name": "Update Last Check Time (Placeholder)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [4450, 300],
+      "disabled": true,
+      "notesInFlow": true,
+      "notes": "TODO: 需要用 Code + HTTP Request 實作更新 Last_Check_Time"
+    },
+    {
+      "parameters": {
         "respondWith": "json",
         "responseBody": "={{ JSON.stringify({ success: false, data: null, error: '使用者不存在' }) }}",
         "options": { "responseCode": 404 }
@@ -330,6 +358,9 @@
       "main": [[{ "node": "Get User Config", "type": "main", "index": 0 }]]
     },
     "Get User Config": {
+      "main": [[{ "node": "Filter User", "type": "main", "index": 0 }]]
+    },
+    "Filter User": {
       "main": [[{ "node": "User Exists?", "type": "main", "index": 0 }]]
     },
     "User Exists?": {

@@ -324,25 +324,6 @@
     },
     {
       "parameters": {
-        "method": "PUT",
-        "url": "=https://sheets.googleapis.com/v4/spreadsheets/{{ $env.MASTER_SYNC_SHEET_ID }}/values/Master_Sync!I:I?valueInputOption=USER_ENTERED",
-        "authentication": "oAuth2",
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={\n  \"range\": \"Master_Sync!I:I\",\n  \"values\": []\n}",
-        "options": {}
-      },
-      "id": "update-last-check-placeholder",
-      "name": "Update Last Check Time (Placeholder)",
-      "type": "n8n-nodes-base.noOp",
-      "typeVersion": 1,
-      "position": [4450, 300],
-      "disabled": true,
-      "notesInFlow": true,
-      "notes": "TODO: 需要用 Code + HTTP Request 實作更新 Last_Check_Time"
-    },
-    {
-      "parameters": {
         "respondWith": "json",
         "responseBody": "={{ JSON.stringify({ success: false, data: null, error: '使用者不存在' }) }}",
         "options": { "responseCode": 404 }

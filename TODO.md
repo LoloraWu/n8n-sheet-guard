@@ -1,6 +1,6 @@
 # 待辦清單
 
-> 最後更新：2026-01-10 (整合完成，新增測試 API)
+> 最後更新：2026-01-10 (修復註冊狀態同步、儀表板顯示問題)
 
 ---
 
@@ -30,7 +30,7 @@
 | Workflow B | `backend/workflow-b-report-api-v2.json` | 匯入 n8n | ✅ |
 | Workflow C | `backend/workflow-c-cron-notifier-v2.json` | 匯入 n8n | ✅ |
 | Workflow D | `backend/workflow-d-line-bot-commands.json` | 匯入 n8n | ✅ |
-| 前端 | `frontend/` | `npm run build && npx vercel --prod` | ⏳ |
+| 前端 | `frontend/` | `npm run build && npx vercel --prod` | ⏳ 需重新部署 |
 
 ---
 
@@ -496,7 +496,62 @@ https://lorawu.app.n8n.cloud/webhook/line-webhook
 
 ---
 
-## 🐛 本次修復（2026-01-10 整合檢查）
+## 🐛 本次修復（2026-01-10 v2 - 註冊狀態與儀表板）
+
+### 問題描述
+1. **註冊成功後提醒設定頁還是顯示「未註冊」** - 頁面間狀態不同步
+2. **進度儀錶板沒有正確顯示缺漏項目** - 狀態判斷邏輯問題
+3. **未註冊/已註冊 UI 文案混亂** - 需要統一
+
+### 解決方案：共享狀態 Store
+
+新增 `frontend/src/stores/userState.js` - 使用 Vue 的 `reactive()` 實現跨頁面即時狀態同步。
+
+### 修改的檔案
+
+| 檔案 | 修改內容 |
+|------|----------|
+| `frontend/src/stores/userState.js` | **新增** - 共享使用者狀態 store |
+| `frontend/src/views/Register.vue` | 註冊成功時呼叫 `userState.setRegistered()` |
+| `frontend/src/views/ReminderSettings.vue` | 使用 `userState.state.isRegistered` 判斷註冊狀態 |
+| `frontend/src/views/Dashboard.vue` | 使用共享狀態、新增「已註冊但無表單」狀態 |
+
+### UI 文案統一
+
+| 狀態 | 標題 | 副標題 |
+|------|------|--------|
+| 未註冊 | 首次使用 | 請填寫資料以啟用監測功能 |
+| 已註冊 | 您已註冊 | 可以更改以下資料 |
+| 已註冊無表單 | 尚未設定關注表單 | 請前往「個人設定」加入表單 |
+
+### userState Store API
+
+```javascript
+import { userState } from '@/stores/userState';
+
+// 讀取狀態（唯讀）
+userState.state.isRegistered  // boolean
+userState.state.userId        // string
+userState.state.realName      // string
+
+// 設定已註冊
+userState.setRegistered({
+  userId: 'U123...',
+  realName: '王小明',
+  aliases: ['小明'],
+  sheetUrls: [...]
+});
+
+// 設定未註冊
+userState.setUnregistered();
+
+// 重置
+userState.reset();
+```
+
+---
+
+## 🐛 之前修復（2026-01-10 整合檢查）
 
 | 檔案 | 問題 | 修復 |
 |------|------|------|

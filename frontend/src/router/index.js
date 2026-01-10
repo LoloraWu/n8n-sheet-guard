@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import Register from '../views/Register.vue'
 import Dashboard from '../views/Dashboard.vue'
+import ReminderSettings from '../views/ReminderSettings.vue'
 
 const routes = [
     {
@@ -16,6 +17,11 @@ const routes = [
         path: '/dashboard',
         name: 'Dashboard',
         component: Dashboard
+    },
+    {
+        path: '/reminder',
+        name: 'ReminderSettings',
+        component: ReminderSettings
     }
 ]
 

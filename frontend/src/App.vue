@@ -65,7 +65,7 @@ const login = () => {
 </script>
 
 <template>
-  <div class="min-h-screen bg-gray-100 font-sans">
+  <div class="min-h-screen bg-slate-50 font-sans antialiased">
     <!-- Router View for Pages -->
     <template v-if="isReady || isDev">
       <router-view />
@@ -73,31 +73,60 @@ const login = () => {
     </template>
 
     <!-- Loading State -->
-    <div v-else-if="liffStatus === 'Initializing...'" class="flex flex-col items-center justify-center min-h-screen p-4">
-       <div class="bg-white p-6 rounded-lg shadow-lg text-center">
-          <van-loading size="36px" class="mb-4" />
-          <h1 class="text-xl font-bold mb-2">系統啟動中</h1>
-          <p class="text-gray-500">正在初始化 LIFF...</p>
-       </div>
+    <div v-else-if="liffStatus === 'Initializing...'" class="flex flex-col items-center justify-center min-h-screen p-6">
+      <div class="bg-white p-8 rounded-2xl shadow-sm border border-slate-100 text-center">
+        <van-loading size="32px" color="#6366f1" class="mb-4" />
+        <h1 class="text-lg font-bold text-slate-800 mb-1">系統啟動中</h1>
+        <p class="text-slate-400 text-sm">正在初始化 LIFF...</p>
+      </div>
     </div>
 
     <!-- Error States -->
-    <div v-else class="flex flex-col items-center justify-center min-h-screen p-4">
-       <div class="bg-white p-6 rounded-lg shadow-lg text-center max-w-sm">
-          <van-icon name="warning-o" size="48" color="#faad14" class="mb-4" />
-          <h1 class="text-xl font-bold mb-4">系統初始化失敗</h1>
-          <p class="mb-4 text-gray-600">{{ liffStatus }}</p>
-          <div v-if="liffError" class="text-red-500 text-sm bg-red-50 p-3 rounded mb-4">
-             {{ liffError }}
-          </div>
-          <van-button v-if="liffStatus === 'LIFF ID Not Configured'" type="primary" size="small" @click="location.reload()">
-            重新載入
-          </van-button>
-       </div>
+    <div v-else class="flex flex-col items-center justify-center min-h-screen p-6">
+      <div class="bg-white p-8 rounded-2xl shadow-sm border border-slate-100 text-center max-w-sm">
+        <div class="w-16 h-16 bg-amber-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
+          <van-icon name="warning-o" size="32" color="#f59e0b" />
+        </div>
+        <h1 class="text-lg font-bold text-slate-800 mb-2">系統初始化失敗</h1>
+        <p class="text-slate-500 text-sm mb-4">{{ liffStatus }}</p>
+        <div v-if="liffError" class="text-red-600 text-xs bg-red-50 p-3 rounded-xl mb-4 text-left">
+          {{ liffError }}
+        </div>
+        <button
+          v-if="liffStatus === 'LIFF ID Not Configured'"
+          class="px-6 py-2.5 bg-indigo-600 text-white text-sm font-medium rounded-xl hover:bg-indigo-700"
+          @click="location.reload()"
+        >
+          重新載入
+        </button>
+      </div>
     </div>
   </div>
 </template>
 
 <style>
-/* Global resets handled by Tailwind */
+/* Global custom styles */
+html {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Smooth transitions */
+* {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 4px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
 </style>

@@ -12,13 +12,22 @@ const form = reactive({
 });
 
 const newAlias = ref('');
-const newSheetName = ref('');
 const newSheetUrl = ref('');
+
+// 驗證相關 state
+const isValidating = ref(false);
+const validationResult = ref(null); // { success: true, title, tabCount } 或 { success: false, error }
 
 const isLoading = ref(false);
 const isLoadingProfile = ref(false);
 const isExistingUser = ref(false);
 const userId = ref(null);
+
+// 可用表單列表（從其他使用者取得）
+const availableSheets = ref([]);
+const isLoadingSheets = ref(false);
+const showSheetPicker = ref(false);
+const selectedSheetId = ref('');
 
 // 取得 LIFF userId 的輔助函數
 const getLiffUserId = async () => {
@@ -36,34 +45,62 @@ const getLiffUserId = async () => {
   }
 };
 
+// 載入可用表單列表（其他使用者已連結的表單）
+const loadAvailableSheets = async () => {
+  isLoadingSheets.value = true;
+  try {
+    const response = await userApi.getAvailableSheets();
+    if (response.success && response.data?.sheets) {
+      availableSheets.value = response.data.sheets;
+      console.log('Loaded available sheets:', response.data.sheets);
+    }
+  } catch (err) {
+    console.warn('Failed to load available sheets:', err);
+  } finally {
+    isLoadingSheets.value = false;
+  }
+};
+
 // 載入現有使用者資料
 const loadExistingProfile = async () => {
   if (!userId.value) return;
-  
+
   isLoadingProfile.value = true;
   try {
     const response = await userApi.getProfile(userId.value);
-    
+
     if (response.success && response.data) {
       const userData = response.data;
-      isExistingUser.value = true;
-      
-      // 回填表單資料
-      if (userData.realName) {
-        form.realName = userData.realName;
+
+      // 只要有 realName 或 aliases 就視為「現有使用者」
+      // 這樣即使沒有 sheetUrls 也會回填姓名和別名
+      if (userData.realName || (userData.aliases && userData.aliases.length > 0)) {
+        isExistingUser.value = true;
+
+        // 回填姓名（覆蓋預設的 LINE display name）
+        if (userData.realName) {
+          form.realName = userData.realName;
+        }
+        // 回填別名
+        if (userData.aliases && userData.aliases.length > 0) {
+          form.aliases = [...userData.aliases];
+        }
+
+        console.log('Loaded existing profile (name/aliases):', userData);
       }
-      if (userData.aliases && userData.aliases.length > 0) {
-        form.aliases = [...userData.aliases];
-      }
+
+      // 回填報表（獨立處理，即使是新使用者也可能有報表）
       if (userData.sheetUrls && userData.sheetUrls.length > 0) {
         form.sheetUrls = userData.sheetUrls.map((sheet, index) => ({
-          name: sheet.name || `報表 ${index + 1}`,
+          name: sheet.name || `表單 ${index + 1}`,
           url: sheet.url,
           tags: sheet.tags || []
         }));
+        console.log('Loaded existing sheets:', userData.sheetUrls);
+      } else {
+        // 沒有報表：保持空陣列
+        console.log('No existing sheets');
       }
-      
-      console.log('Loaded existing profile:', userData);
     }
   } catch (err) {
     // 使用者不存在是正常情況，不需要顯示錯誤
@@ -74,25 +111,56 @@ const loadExistingProfile = async () => {
 };
 
 onMounted(async () => {
+  // === DEV MOCK: 開發時預覽 UI ===
+  const DEV_MOCK = false;
+  if (DEV_MOCK) {
+    form.realName = '王小明';
+    form.aliases = ['小明', 'Sin', 'Tommy'];
+    form.sheetUrls = [
+      {
+        name: '【蔚藍星球國王很忙】第二期12月專案',
+        url: 'https://docs.google.com/spreadsheets/d/1aBcDeFgHiJkLmNoPqRsTuVwXyZ',
+        tags: []
+      },
+      {
+        name: '每日進度追蹤表',
+        url: 'https://docs.google.com/spreadsheets/d/2zYxWvUtSrQpOnMlKjIhGfEdCbA',
+        tags: []
+      }
+    ];
+    availableSheets.value = [
+      {
+        spreadsheetId: '3aAbBcCdDeEfFgGhHiIjJ',
+        name: '哈拉版玩家留言統計',
+        url: 'https://docs.google.com/spreadsheets/d/3aAbBcCdDeEfFgGhHiIjJ'
+      }
+    ];
+    isExistingUser.value = true;
+    isLoadingProfile.value = false;
+    return;
+  }
+  // === END DEV MOCK ===
+
   try {
     // 取得 userId
     userId.value = await getLiffUserId();
-    
+
+    // 載入可用表單列表（不需要登入也可以載入）
+    loadAvailableSheets();
+
     if (liff.isLoggedIn()) {
       const profile = await liff.getProfile();
-      if (profile.displayName) {
-        // 先載入現有資料
+      const displayName = profile?.displayName || '';
+
+      // 先設定預設值：使用 LINE display name
+      // 關注報表預設為空，讓使用者自己填
+      form.realName = displayName;
+      form.aliases = displayName ? [displayName] : [];
+      form.sheetUrls = [];
+
+      // 再嘗試載入現有資料（只有真正註冊過的使用者才會覆蓋）
+      if (userId.value) {
         await loadExistingProfile();
-        
-        // 如果是新使用者，自動填入 LINE 顯示名稱
-        if (!isExistingUser.value) {
-          if (!form.realName) {
-            form.realName = profile.displayName;
-          }
-          if (!form.aliases.includes(profile.displayName)) {
-            form.aliases.push(profile.displayName);
-          }
-        }
       }
     }
   } catch (err) {
@@ -105,9 +173,7 @@ const submitButtonText = computed(() => {
   return isExistingUser.value ? '更新設定' : '儲存設定';
 });
 
-const pageTitle = computed(() => {
-  return isExistingUser.value ? '編輯設定' : '個人設定 / 註冊';
-});
+const pageTitle = computed(() => '個人設定');
 
 // Methods
 const addAlias = () => {
@@ -123,24 +189,131 @@ const removeAlias = (index) => {
   form.aliases.splice(index, 1);
 };
 
-const addSheet = () => {
-  if (newSheetUrl.value.trim()){
-      // Basic URL validation
-      if(!newSheetUrl.value.includes('docs.google.com/spreadsheets')) {
-          showToast('請輸入有效的 Google Sheet 網址');
-          return;
-      }
-      
-      form.sheetUrls.push({
-          name: newSheetName.value || `報表 ${form.sheetUrls.length + 1}`,
-          url: newSheetUrl.value.trim(),
-          tags: []
-      });
-      
-      newSheetName.value = '';
-      newSheetUrl.value = '';
+// 驗證 Google Sheet URL
+const validateSheetUrl = async () => {
+  const url = newSheetUrl.value.trim();
+  
+  if (!url) {
+    showToast('請先輸入 Google 表單網址');
+    return;
+  }
+
+  // 基本 URL 格式檢查
+  if (!url.includes('docs.google.com/spreadsheets')) {
+    validationResult.value = { success: false, error: '無效的 Google 表單網址格式' };
+    return;
+  }
+
+  isValidating.value = true;
+  validationResult.value = null;
+
+  try {
+    const response = await userApi.validateSheet(url);
+    
+    if (response && response.success && response.data?.valid) {
+      validationResult.value = {
+        success: true,
+        title: response.data.title,
+        spreadsheetId: response.data.spreadsheetId,
+        tabCount: response.data.tabCount
+      };
+    } else if (!response || response === '') {
+      validationResult.value = { success: false, error: '伺服器無回應' };
+    } else {
+      validationResult.value = { success: false, error: response.error || '驗證失敗' };
+    }
+  } catch (error) {
+    validationResult.value = { success: false, error: error.message || '驗證失敗，請檢查網路連線' };
+  } finally {
+    isValidating.value = false;
   }
 };
+
+// 清除驗證結果（當 URL 改變時）
+const onSheetUrlChange = () => {
+  validationResult.value = null;
+};
+
+const addSheet = () => {
+  if (newSheetUrl.value.trim()) {
+    // 基本 URL 格式檢查
+    if (!newSheetUrl.value.includes('docs.google.com/spreadsheets')) {
+      showToast('請輸入有效的 Google 表單網址');
+      return;
+    }
+
+    // 檢查是否已驗證成功
+    if (!validationResult.value?.success) {
+      showToast('請先驗證表單網址');
+      return;
+    }
+
+    // 檢查是否已存在
+    const alreadyExists = form.sheetUrls.some(s => 
+      s.url.includes(validationResult.value.spreadsheetId)
+    );
+    if (alreadyExists) {
+      showToast('此表單已在關注列表中');
+      return;
+    }
+
+    form.sheetUrls.push({
+      name: validationResult.value.title || `表單 ${form.sheetUrls.length + 1}`,
+      url: newSheetUrl.value.trim(),
+      tags: []
+    });
+
+    // 清空輸入和驗證結果
+    newSheetUrl.value = '';
+    validationResult.value = null;
+    
+    showToast({ type: 'success', message: '已加入關注表單' });
+  }
+};
+
+// 從下拉選單選擇表單
+const addSheetFromPicker = () => {
+  if (!selectedSheetId.value) return;
+
+  const sheet = availableSheets.value.find(s => s.spreadsheetId === selectedSheetId.value);
+  if (!sheet) return;
+
+  // 檢查是否已經加入
+  const alreadyExists = form.sheetUrls.some(s => s.url.includes(sheet.spreadsheetId));
+  if (alreadyExists) {
+    showToast('此表單已在關注列表中');
+    return;
+  }
+
+  form.sheetUrls.push({
+    name: sheet.name,
+    url: sheet.url,
+    tags: []
+  });
+
+  selectedSheetId.value = '';
+  showSheetPicker.value = false;
+  showToast({ type: 'success', message: '已加入關注表單' });
+};
+
+// 縮短 URL 顯示
+const shortenUrl = (url) => {
+  if (!url) return '';
+  // 從 Google Sheet URL 提取 spreadsheetId 並縮短
+  const match = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
+  if (match) {
+    const id = match[1];
+    return `...${id.slice(-8)}`;
+  }
+  return url.length > 20 ? url.slice(0, 20) + '...' : url;
+};
+
+// 可選擇的表單（排除已加入的）
+const selectableSheets = computed(() => {
+  return availableSheets.value.filter(sheet => {
+    return !form.sheetUrls.some(s => s.url.includes(sheet.spreadsheetId));
+  });
+});
 
 const removeSheet = (index) => {
     form.sheetUrls.splice(index, 1);
@@ -151,10 +324,20 @@ const onSubmit = async () => {
       showToast('請填寫真實姓名');
       return;
   }
+
+  // 確保 userId 已載入
+  if (!userId.value) {
+      // 嘗試重新取得 userId
+      userId.value = await getLiffUserId();
+      if (!userId.value) {
+          showToast({ type: 'fail', message: '無法取得用戶資訊，請重新開啟頁面' });
+          return;
+      }
+  }
   
   isLoading.value = true;
   try {
-      const currentUserId = userId.value || 'U_GUEST';
+      const currentUserId = userId.value;
       
       const payload = {
           userId: currentUserId,
@@ -166,19 +349,32 @@ const onSubmit = async () => {
       console.log('Submitting to n8n:', payload);
       
       const response = await userApi.register(payload);
+      console.log('Register response:', response);
       
-      if (response) {
+      // 檢查回應是否有效
+      if (response && response.success) {
           showToast({ 
             type: 'success', 
             message: isExistingUser.value ? '設定已更新' : '註冊成功' 
           });
           isExistingUser.value = true;
-          console.log('Response:', response);
+      } else if (!response || response === '') {
+          // 後端回傳空內容 = 失敗
+          showToast({ 
+            type: 'fail', 
+            message: '儲存失敗：伺服器無回應' 
+          });
+      } else {
+          // 有回應但不是成功
+          showToast({ 
+            type: 'fail', 
+            message: response?.error || '儲存失敗，請稍後再試' 
+          });
       }
       
   } catch (error) {
-      showToast({ type: 'fail', message: error.message || '儲存失敗' });
       console.error('API Error:', error);
+      showToast({ type: 'fail', message: error.message || '儲存失敗，請檢查網路連線' });
   } finally {
       isLoading.value = false;
   }
@@ -186,118 +382,278 @@ const onSubmit = async () => {
 </script>
 
 <template>
-  <div class="pb-20">
-    <van-nav-bar :title="pageTitle" />
-    
-    <!-- Loading State -->
-    <div v-if="isLoadingProfile" class="p-8 text-center text-gray-500">
-      <van-loading size="24px" vertical>載入中...</van-loading>
+  <div class="pb-24 min-h-screen bg-slate-50">
+    <!-- Header -->
+    <div class="bg-gradient-to-br from-indigo-600 to-violet-600 text-white px-5 pt-6 pb-8">
+      <h1 class="text-xl font-bold tracking-tight">{{ pageTitle }}</h1>
+      <p class="text-indigo-200 text-sm mt-1">管理您的個人資料與關注表單</p>
     </div>
-    
-    <div v-else class="p-4">
-      <!-- User Status Badge -->
-      <div v-if="isExistingUser" class="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg flex items-center">
-        <van-icon name="passed" color="#16a34a" size="20" class="mr-2" />
-        <span class="text-green-700 text-sm">已註冊使用者，您可以修改以下設定</span>
+
+    <!-- Loading State -->
+    <div v-if="isLoadingProfile" class="p-12 text-center">
+      <van-loading size="28px" color="#6366f1" />
+      <p class="text-slate-400 mt-3 text-sm">載入中...</p>
+    </div>
+
+    <div v-else class="px-4 -mt-4">
+      <!-- Status Card -->
+      <div v-if="!isExistingUser" class="bg-amber-50 rounded-2xl p-4 mb-5 border border-amber-200 shadow-sm">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 bg-amber-400 rounded-xl flex items-center justify-center">
+            <van-icon name="info-o" size="22" color="#fff" />
+          </div>
+          <div class="flex-1 min-w-0">
+            <p class="font-semibold text-amber-900 text-sm">首次使用</p>
+            <p class="text-amber-700 text-xs mt-0.5">請填寫資料以啟用監測功能</p>
+          </div>
+        </div>
       </div>
-      
+
+      <div v-else class="bg-emerald-50 rounded-2xl p-4 mb-5 border border-emerald-200 shadow-sm">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 bg-emerald-500 rounded-xl flex items-center justify-center">
+            <van-icon name="passed" size="22" color="#fff" />
+          </div>
+          <div class="flex-1 min-w-0">
+            <p class="font-semibold text-emerald-900 text-sm">已註冊</p>
+            <p class="text-emerald-700 text-xs mt-0.5">您可隨時修改以下設定</p>
+          </div>
+        </div>
+      </div>
+
       <van-form @submit="onSubmit">
         <!-- Section 1: Basic Info -->
-        <h2 class="text-sm font-bold text-gray-500 mb-2 px-2">基本資料</h2>
-        <van-cell-group inset class="mb-4">
-          <van-field
-            v-model="form.realName"
-            name="realName"
-            label="真實姓名"
-            placeholder="請輸入您的姓名"
-            :rules="[{ required: true, message: '請填寫姓名' }]"
-          />
-        </van-cell-group>
-        
-        <!-- Section 2: Aliases -->
-        <h2 class="text-sm font-bold text-gray-500 mb-2 px-2">
-          身分別名 <span class="text-xs font-normal text-gray-400">(用於識別報表中的名字)</span>
-        </h2>
-        <van-cell-group inset class="mb-4">
-          <div class="p-3 bg-white">
-             <div class="flex flex-wrap mb-3" style="gap: 32px !important;">
-                 <van-tag 
-                   v-for="(alias, index) in form.aliases" 
-                   :key="index" 
-                   closeable 
-                   size="large" 
-                   type="primary" 
-                   class="!text-base !py-1 !px-2"
-                   @close="removeAlias(index)"
-                 >
-                   {{ alias }}
-                 </van-tag>
-                 <span v-if="form.aliases.length === 0" class="text-gray-400 text-sm">暫無別名</span>
-             </div>
-             
-             <div class="flex items-center gap-2">
-                 <van-field
-                   v-model="newAlias"
-                   placeholder="新增別名 (e.g. 小張)"
-                   class="!p-0 flex-1 border-b border-gray-200"
-                   :border="false"
-                 />
-                 <van-button size="small" type="primary" icon="plus" @click="addAlias">新增</van-button>
-             </div>
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 mb-5 overflow-hidden">
+          <div class="flex items-center bg-slate-50 border-l-4 border-indigo-400 px-4 py-3">
+            <span class="text-lg mr-2">👤</span>
+            <h2 class="text-sm font-semibold text-slate-800">基本資料</h2>
           </div>
-        </van-cell-group>
+          <van-cell-group :border="false">
+            <van-field
+              v-model="form.realName"
+              name="realName"
+              label="姓名"
+              placeholder="請輸入您的姓名"
+              label-width="3.5em"
+              :rules="[{ required: true, message: '請填寫姓名' }]"
+            />
+          </van-cell-group>
+        </div>
 
-        <!-- Section 3: Sheet URLs -->
-        <h2 class="text-sm font-bold text-gray-500 mb-2 px-2">關注報表</h2>
-        
-        <!-- Hint: Auto scan all tabs -->
-        <div class="mx-2 mb-3 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-700">
-          <div class="flex items-start gap-2">
-            <van-icon name="info-o" class="mt-0.5 flex-shrink-0" />
-            <div>
-              <p class="font-medium">自動掃描所有分頁</p>
-              <p class="text-blue-600 mt-1">只需貼上 Google Sheet 網址，系統會自動掃描該試算表內的<strong>所有分頁</strong>，不需要另外選擇。</p>
+        <!-- Section 2: Aliases -->
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 mb-5 overflow-hidden">
+          <div class="flex items-center bg-slate-50 border-l-4 border-indigo-400 px-4 py-3">
+            <span class="text-lg mr-2">🏷️</span>
+            <div class="flex-1">
+              <h2 class="text-sm font-semibold text-slate-800">身分別名</h2>
+              <p class="text-xs text-slate-400 mt-0.5">系統用這些名字在表單中尋找您</p>
+            </div>
+            <span v-if="form.aliases.length > 0" class="text-xs bg-indigo-500 text-white px-2 py-0.5 rounded-full font-medium">
+              {{ form.aliases.length }}
+            </span>
+          </div>
+          <div class="p-4 border-l-4 border-transparent ml-4 border-l-slate-200">
+            <!-- Alias Tags -->
+            <div v-if="form.aliases.length > 0" class="flex flex-wrap gap-2 mb-4">
+              <span
+                v-for="(alias, index) in form.aliases"
+                :key="index"
+                class="inline-flex items-center gap-1.5 bg-indigo-50 text-indigo-700 px-3 py-1.5 rounded-full text-sm font-medium"
+              >
+                {{ alias }}
+                <van-icon
+                  name="cross"
+                  size="14"
+                  class="cursor-pointer opacity-60 hover:opacity-100"
+                  @click="removeAlias(index)"
+                />
+              </span>
+            </div>
+            <p v-else class="text-slate-400 text-sm mb-4">尚未設定別名</p>
+
+            <!-- Add Alias Input -->
+            <div class="flex items-center gap-2">
+              <input
+                v-model="newAlias"
+                type="text"
+                placeholder="輸入新別名"
+                class="flex-1 px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+                @keyup.enter="addAlias"
+              />
+              <button
+                type="button"
+                class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-xl hover:bg-blue-700 active:scale-[0.98] transition-transform"
+                @click="addAlias"
+              >
+                新增
+              </button>
             </div>
           </div>
         </div>
-        
-        <van-cell-group inset class="mb-4">
-             <van-cell v-for="(sheet, index) in form.sheetUrls" :key="index" center>
-                 <template #title>
-                     <div class="font-bold text-base mb-1" style="color: rgb(37, 99, 235) !important;">{{ sheet.name }}</div>
-                     <div class="text-xs text-gray-500 truncate">{{ sheet.url }}</div>
-                 </template>
-                 <template #right-icon>
-                     <van-icon name="delete" color="#ef4444" size="26" class="ml-3" @click="removeSheet(index)" />
-                 </template>
-             </van-cell>
-             
-             <div class="p-3 bg-white border-t border-gray-100">
-                 <van-field
-                   v-model="newSheetName"
-                   label="報表名稱"
-                   placeholder="例：每日進度"
-                   label-width="4.5em"
-                   class="!px-0"
-                 />
-                 <van-field
-                   v-model="newSheetUrl"
-                   label="網址"
-                   placeholder="https://docs.google.com/..."
-                   label-width="4.5em"
-                   class="!px-0 mb-2"
-                 />
-                 <van-button block size="small" icon="plus" type="primary" plain @click="addSheet">
-                     加入關注列表
-                 </van-button>
-             </div>
-        </van-cell-group>
 
-        <!-- Submit -->
-        <div class="mt-8 px-2">
-          <van-button round block type="primary" native-type="submit" :loading="isLoading">
+        <!-- Section 3: Sheet URLs -->
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 mb-5 overflow-hidden">
+          <div class="flex items-center bg-slate-50 border-l-4 border-indigo-400 px-4 py-3">
+            <span class="text-lg mr-2">📊</span>
+            <div class="flex-1">
+              <h2 class="text-sm font-semibold text-slate-800">關注表單</h2>
+              <p class="text-xs text-slate-400 mt-0.5">系統會自動掃描所有分頁 <span class="text-amber-600">⚠️ 請確認 Google 表單已設定為『知道連結的人都可以檢視』</span></p>
+            </div>
+            <span v-if="form.sheetUrls.length > 0" class="text-xs bg-emerald-500 text-white px-2 py-0.5 rounded-full font-medium">
+              {{ form.sheetUrls.length }}
+            </span>
+          </div>
+
+          <!-- Sheet List -->
+          <div v-if="form.sheetUrls.length > 0" class="border-l-4 border-transparent ml-4 border-l-slate-200">
+            <div
+              v-for="(sheet, index) in form.sheetUrls"
+              :key="index"
+              class="flex items-center px-4 py-3 gap-3 border-b border-slate-100 last:border-b-0 bg-emerald-50"
+            >
+              <span class="text-lg">📄</span>
+              <div class="flex-1 min-w-0">
+                <p class="font-medium text-slate-800 text-sm truncate">{{ sheet.name }}</p>
+                <p class="text-xs text-slate-400 break-all">{{ sheet.url }}</p>
+              </div>
+              <button
+                type="button"
+                class="text-red-500 p-2 rounded-lg hover:bg-red-50 active:scale-95"
+                @click="removeSheet(index)"
+              >
+                <van-icon name="delete-o" size="18" />
+              </button>
+            </div>
+          </div>
+
+          <div v-else class="py-8 text-center">
+            <van-icon name="notes-o" size="36" color="#cbd5e1" />
+            <p class="text-slate-400 text-sm mt-2">尚未加入表單</p>
+          </div>
+
+          <!-- Add Sheet Section -->
+          <div class="border-t border-slate-100">
+            <!-- Quick Select (if available) -->
+            <div v-if="selectableSheets.length > 0">
+              <div class="flex items-center bg-slate-50 border-l-4 border-blue-400 px-4 py-2.5">
+                <span class="text-base mr-2">⚡</span>
+                <span class="text-sm font-medium text-slate-700">快速選擇表單</span>
+              </div>
+              <div class="p-4 border-l-4 border-transparent ml-4 border-l-slate-200 bg-blue-50/30">
+                <div
+                  class="px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-sm cursor-pointer mb-3"
+                  @click="showSheetPicker = true"
+                >
+                  <template v-if="selectedSheetId">
+                    <p class="text-slate-800 font-medium">{{ availableSheets.find(s => s.spreadsheetId === selectedSheetId)?.name || '已選擇' }}</p>
+                    <p class="text-xs text-slate-400 break-all mt-1">{{ availableSheets.find(s => s.spreadsheetId === selectedSheetId)?.url }}</p>
+                  </template>
+                  <span v-else class="text-slate-400">{{ isLoadingSheets ? '載入中...' : '點擊選擇表單' }}</span>
+                </div>
+                <button
+                  type="button"
+                  class="w-full py-2.5 text-sm font-medium text-white bg-blue-600 rounded-xl disabled:opacity-50 active:scale-[0.98] transition-transform"
+                  :disabled="!selectedSheetId"
+                  @click="addSheetFromPicker"
+                >
+                  <van-icon name="plus" class="mr-1" />
+                  加入
+                </button>
+              </div>
+            </div>
+
+            <!-- Manual Input -->
+            <div>
+              <div class="flex items-center bg-slate-50 border-l-4 border-blue-400 px-4 py-2.5">
+                <span class="text-base mr-2">✏️</span>
+                <span class="text-sm font-medium text-slate-700">手動輸入網址</span>
+              </div>
+              <div class="p-4 border-l-4 border-transparent ml-4 border-l-slate-200 bg-blue-50/30">
+                <!-- URL 輸入 + 驗證按鈕 -->
+                <div class="flex items-center gap-2 mb-3">
+                  <input
+                    v-model="newSheetUrl"
+                    type="text"
+                    placeholder="Google 表單網址"
+                    class="flex-1 px-3 py-2.5 text-sm border border-slate-200 rounded-xl bg-white focus:outline-none focus:border-blue-400"
+                    @input="onSheetUrlChange"
+                  />
+                  <button
+                    type="button"
+                    class="px-4 py-2.5 text-sm font-medium text-white bg-slate-600 rounded-xl hover:bg-slate-700 disabled:opacity-50 transition-colors whitespace-nowrap"
+                    :disabled="isValidating || !newSheetUrl.trim()"
+                    @click="validateSheetUrl"
+                  >
+                    <van-loading v-if="isValidating" size="14" color="#fff" class="mr-1" />
+                    {{ isValidating ? '驗證中' : '驗證' }}
+                  </button>
+                </div>
+
+                <!-- 驗證結果顯示 -->
+                <div v-if="validationResult" class="mb-3">
+                  <!-- 成功 -->
+                  <div v-if="validationResult.success" class="bg-emerald-50 border border-emerald-200 rounded-xl p-3">
+                    <div class="flex items-center gap-2 text-emerald-700">
+                      <van-icon name="passed" size="18" color="#059669" />
+                      <span class="font-medium text-sm">驗證成功</span>
+                    </div>
+                    <div class="mt-2 text-emerald-600 text-xs space-y-1">
+                      <p>📄 {{ validationResult.title }}</p>
+                      <p>📑 共 {{ validationResult.tabCount }} 個分頁</p>
+                    </div>
+                  </div>
+                  <!-- 失敗 -->
+                  <div v-else class="bg-red-50 border border-red-200 rounded-xl p-3">
+                    <div class="flex items-center gap-2 text-red-700">
+                      <van-icon name="cross" size="18" color="#dc2626" />
+                      <span class="font-medium text-sm">驗證失敗</span>
+                    </div>
+                    <p class="mt-1 text-red-600 text-xs">{{ validationResult.error }}</p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  class="w-full py-2.5 text-sm font-medium text-white bg-blue-600 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98] transition-transform"
+                  :disabled="!validationResult?.success"
+                  @click="addSheet"
+                >
+                  <van-icon name="plus" class="mr-1" />
+                  加入
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Sheet Picker Popup -->
+        <van-action-sheet v-model:show="showSheetPicker" title="選擇表單">
+          <div class="max-h-[60vh] overflow-y-auto">
+            <div
+              v-for="sheet in selectableSheets"
+              :key="sheet.spreadsheetId"
+              class="px-4 py-3 border-b border-slate-100 active:bg-slate-50 cursor-pointer"
+              @click="selectedSheetId = sheet.spreadsheetId; showSheetPicker = false;"
+            >
+              <p class="font-medium text-slate-800 text-sm">{{ sheet.name }}</p>
+              <p class="text-xs text-slate-400 break-all mt-1">{{ sheet.url }}</p>
+            </div>
+            <div v-if="selectableSheets.length === 0" class="py-8 text-center text-slate-400 text-sm">
+              沒有可選擇的表單
+            </div>
+          </div>
+        </van-action-sheet>
+
+        <!-- Submit Button -->
+        <div class="mt-6">
+          <button
+            type="submit"
+            class="w-full py-3.5 bg-gradient-to-r from-indigo-600 to-violet-600 text-white font-semibold rounded-2xl shadow-lg shadow-indigo-200 active:scale-[0.98] transition-transform"
+            :disabled="isLoading"
+          >
+            <van-loading v-if="isLoading" size="18" color="#fff" class="mr-2" />
             {{ submitButtonText }}
-          </van-button>
+          </button>
         </div>
       </van-form>
     </div>

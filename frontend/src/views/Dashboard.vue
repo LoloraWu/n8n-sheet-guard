@@ -4,7 +4,12 @@ import liff from '@line/liff';
 import { reportApi } from '@/services/api';
 
 // ============ Mock Mode ============
-const USE_MOCK = false; // 設為 false 使用真實 API
+const USE_MOCK = false; // 設為 true 使用假資料預覽
+
+// ============ 開發模式：本地測試用 ============
+// 設定一個測試用的 userId，這樣不需要 LIFF 登入也能測試
+const DEV_MODE = false; // 上線前改成 false
+const DEV_USER_ID = 'TEST123'; // 測試用 userId
 
 const MOCK_RESPONSE = {
   success: true,
@@ -74,21 +79,22 @@ const MOCK_RESPONSE = {
       {
         sheetTitle: '【蔚藍星球國王很忙】第二期12月專案',
         tabName: '哈拉版玩家留言',
-        note: '欄位「備註」可能需要填寫，請自行檢查是否缺漏'
+        tabUrl: 'https://docs.google.com/spreadsheets/d/1abc123#gid=123',
+        fieldName: '備註',
+        cellRef: 'F4',
+        note: '此欄位為選填，請自行檢查是否需要填寫'
       },
       {
         sheetTitle: '2025年團隊工作追蹤',
         tabName: '工作日誌',
-        note: '欄位「補充說明」為選填欄位，請視需要填寫'
+        tabUrl: 'https://docs.google.com/spreadsheets/d/2xyz789#gid=0',
+        fieldName: '補充說明',
+        cellRef: 'D8',
+        note: '此欄位為選填，請視需要填寫'
       }
     ],
-    warnings: [
-      {
-        sheetTitle: '2025年團隊工作追蹤',
-        tabName: '歷史紀錄',
-        message: '此分頁資料量超過 50,000 筆，已改用「表頭+尾端」抽樣掃描，可能漏掉較早的今日資料'
-      }
-    ]
+    warnings: [],
+    lastCheckTime: new Date().toISOString()
   }
 };
 
@@ -122,6 +128,12 @@ const expandedReportIds = ref([]);
 
 // ============ Helpers ============
 const getLiffUserId = async () => {
+  // 開發模式：直接回傳測試 userId
+  if (DEV_MODE) {
+    console.log('🔧 開發模式：使用測試 userId =', DEV_USER_ID);
+    return DEV_USER_ID;
+  }
+  
   if (!liff.isLoggedIn()) return null;
   try {
     const context = liff.getContext();
@@ -135,24 +147,47 @@ const getLiffUserId = async () => {
 };
 
 // ============ Computed ============
+// 判斷用戶是否需要設定（未註冊或未設定表單）
+const needsSetup = computed(() => {
+  // 載入中不算
+  if (loading.value) return false;
+  // 有錯誤（通常表示用戶未註冊）或 tabsScanned 為 0 都需要設定
+  if (error.value) return true;
+  return summary.value.tabsScanned === 0;
+});
+
+// 是否有有效資料（已註冊且有掃描結果）
+const hasValidData = computed(() => {
+  return !loading.value && !error.value && summary.value.tabsScanned > 0;
+});
+
 const statusText = computed(() => {
+  if (loading.value) return '載入中...';
+  if (needsSetup.value) return '⚙️ 尚未設定';
   if (summary.value.allCompleted && summary.value.missing === 0) {
-    return '✅ 全部完成';
+    return '✓ 全部完成';
   }
-  return `⚠️ ${summary.value.missing} 項未完成`;
+  return `${summary.value.missing} 項待填`;
 });
 
 const statusBgClass = computed(() => {
+  if (loading.value) return 'bg-slate-500';
+  if (needsSetup.value) return 'bg-slate-600';
   return summary.value.allCompleted ? 'bg-green-600' : 'bg-orange-500';
 });
 
 const lastUpdatedText = computed(() => {
   if (!lastUpdated.value) return '尚未更新';
-  const now = new Date();
-  const diff = Math.floor((now - lastUpdated.value) / 1000);
-  if (diff < 60) return '剛剛';
-  if (diff < 3600) return `${Math.floor(diff / 60)} 分鐘前`;
-  return lastUpdated.value.toLocaleTimeString('zh-TW');
+  // 顯示台北時間（完整日期 + 時間）
+  return lastUpdated.value.toLocaleString('zh-TW', {
+    timeZone: 'Asia/Taipei',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  });
 });
 
 // 把 reports + advisories 分組成 Sheet -> Tab -> Items
@@ -162,12 +197,12 @@ const groupedReports = computed(() => {
   // 處理缺漏項目
   for (const r of reports.value) {
     const sheetKey = r.spreadsheetId || r.sheetId || 'unknown';
-    const tabKey = r.tabName || 'Sheet1';
+    const tabKey = r.tabName || '分頁1';
 
     if (!sheets[sheetKey]) {
       sheets[sheetKey] = {
         sheetId: sheetKey,
-        sheetTitle: r.sheetTitle || '未命名報表',
+        sheetTitle: r.sheetTitle || '未命名表單',
         sheetUrl: r.sheetUrl || `https://docs.google.com/spreadsheets/d/${sheetKey}`,
         tabs: {},
         missingCount: 0,
@@ -216,7 +251,7 @@ const groupedReports = computed(() => {
     }
 
     if (targetSheet) {
-      const tabKey = adv.tabName || 'Sheet1';
+      const tabKey = adv.tabName || '分頁1';
       if (!targetSheet.tabs[tabKey]) {
         targetSheet.tabs[tabKey] = {
           tabName: tabKey,
@@ -324,9 +359,9 @@ const checkStatus = async () => {
             id: r.id || `report-${idx}`,
             headline: r.headline || buildHeadline(r),
             spreadsheetId: r.spreadsheetId || r.sheetId,
-            sheetTitle: r.sheetTitle || r.sheetName || '未命名報表',
+            sheetTitle: r.sheetTitle || r.sheetName || '未命名表單',
             sheetUrl: r.sheetUrl || `https://docs.google.com/spreadsheets/d/${r.spreadsheetId || r.sheetId}`,
-            tabName: r.tabName || 'Sheet1',
+            tabName: r.tabName || '分頁1',
             tabUrl: r.tabUrl || r.sheetUrl,
             missingFieldName: r.missingFieldName || r.fieldName || '未知欄位',
             cellRef: r.cellRef || '',
@@ -338,7 +373,7 @@ const checkStatus = async () => {
           reports.value = [];
           data.reports.forEach((oldReport, sheetIdx) => {
             const sheetId = oldReport.sheetId || `sheet-${sheetIdx}`;
-            const sheetName = oldReport.sheetName || `報表 ${sheetIdx + 1}`;
+            const sheetName = oldReport.sheetName || `表單 ${sheetIdx + 1}`;
             const sheetUrl = `https://docs.google.com/spreadsheets/d/${sheetId}`;
 
             if (oldReport.status === 'missing') {
@@ -351,7 +386,7 @@ const checkStatus = async () => {
                   spreadsheetId: sheetId,
                   sheetTitle: sheetName,
                   sheetUrl: sheetUrl,
-                  tabName: oldReport.tabName || 'Sheet1',
+                  tabName: oldReport.tabName || '分頁1',
                   tabUrl: sheetUrl,
                   missingFieldName: typeof item === 'string' ? item : (item.fieldName || '未知欄位'),
                   cellRef: typeof item === 'object' ? item.cellRef : '',
@@ -376,15 +411,13 @@ const checkStatus = async () => {
       // warnings
       warnings.value = data.warnings || [];
 
-      lastUpdated.value = new Date();
+      // 使用 API 回傳的 lastCheckTime，若無則用前端時間
+      lastUpdated.value = data.lastCheckTime ? new Date(data.lastCheckTime) : new Date();
 
-      // 預設展開第一個 sheet
-      if (groupedReports.value.length > 0) {
-        expandedSheets.value = [groupedReports.value[0].sheetId];
-      }
+      // Sheets 和 Tabs 現在預設全部展開，不需要手動控制
 
     } else {
-      error.value = response?.error || '無法取得報表狀態';
+      error.value = response?.error || '無法取得表單狀態';
     }
   } catch (err) {
     console.error('API Error:', err);
@@ -410,258 +443,214 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="pb-20 min-h-screen bg-gray-50">
-    <van-nav-bar title="關注報表儀表板" />
+  <div class="pb-24 min-h-screen bg-slate-50">
+    <!-- Header with Status -->
+    <div
+      class="text-white px-5 pt-6 pb-10"
+      :class="[
+        loading ? 'bg-gradient-to-br from-slate-500 to-slate-600' :
+        needsSetup ? 'bg-gradient-to-br from-slate-600 to-slate-700' :
+        (summary.allCompleted && summary.missing === 0)
+          ? 'bg-gradient-to-br from-emerald-500 to-teal-600'
+          : 'bg-gradient-to-br from-indigo-600 to-violet-600'
+      ]"
+    >
+      <div class="flex items-center justify-between mb-4">
+        <h1 class="text-xl font-bold tracking-tight">表單進度儀表板</h1>
+        <button
+          class="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center active:scale-95 transition-transform"
+          :disabled="loading"
+          @click="checkStatus"
+        >
+          <van-icon name="replay" size="18" :class="{ 'animate-spin': loading }" />
+        </button>
+      </div>
 
-    <!-- Error Message -->
-    <div v-if="error" class="bg-red-100 border border-red-300 text-red-700 px-4 py-3 m-4 rounded-lg">
-      <div class="flex items-center">
-        <van-icon name="warning-o" class="mr-2" />
-        {{ error }}
+      <div class="text-center">
+        <div class="text-4xl font-bold mb-1">
+          {{ statusText }}
+        </div>
+        <p class="text-white/70 text-sm">
+          <template v-if="loading">正在載入...</template>
+          <template v-else-if="needsSetup">請先完成個人設定</template>
+          <template v-else>已掃描 {{ summary.tabsScanned || 0 }} 個分頁 · {{ lastUpdatedText }}</template>
+        </p>
       </div>
     </div>
 
-    <!-- Warnings Banner -->
-    <div v-if="warnings.length > 0" class="mx-4 mt-4">
+    <!-- Error Message (only show if not needsSetup, since needsSetup handles unregistered users) -->
+    <div v-if="error && !needsSetup" class="mx-4 -mt-4 mb-4">
+      <div class="bg-red-50 border border-red-200 rounded-2xl p-4 flex items-start gap-3">
+        <div class="w-8 h-8 bg-red-100 rounded-xl flex items-center justify-center flex-shrink-0">
+          <van-icon name="warning-o" size="18" color="#dc2626" />
+        </div>
+        <div class="flex-1 min-w-0">
+          <p class="text-red-800 font-medium text-sm">發生錯誤</p>
+          <p class="text-red-600 text-xs mt-0.5">{{ error }}</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Warnings -->
+    <div v-if="warnings.length > 0" class="mx-4 -mt-4 mb-4 space-y-2">
       <div
         v-for="(warn, idx) in warnings"
         :key="`warn-${idx}`"
-        class="bg-yellow-50 border border-yellow-300 text-yellow-800 px-4 py-3 rounded-lg mb-2 text-sm"
+        class="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex items-start gap-3"
       >
-        <div class="flex items-start">
-          <van-icon name="info-o" class="mr-2 mt-0.5 flex-shrink-0" />
-          <div>
-            <span v-if="warn.sheetTitle" class="font-medium">{{ warn.sheetTitle }}</span>
-            <span v-if="warn.tabName"> / {{ warn.tabName }}</span>
-            <span v-if="warn.sheetTitle || warn.tabName">：</span>
-            {{ warn.message || warn }}
-          </div>
+        <div class="w-8 h-8 bg-amber-100 rounded-xl flex items-center justify-center flex-shrink-0">
+          <van-icon name="info-o" size="18" color="#d97706" />
+        </div>
+        <div class="flex-1 min-w-0 text-sm">
+          <span v-if="warn.sheetTitle" class="font-medium text-amber-800">{{ warn.sheetTitle }}</span>
+          <span v-if="warn.tabName" class="text-amber-700"> / {{ warn.tabName }}</span>
+          <p class="text-amber-700 mt-0.5">{{ warn.message || warn }}</p>
         </div>
       </div>
     </div>
 
-    <!-- Status Overview -->
-    <div :class="[statusBgClass, 'p-6 text-white text-center transition-colors duration-300']">
-      <h2 class="text-lg opacity-90">今日狀態</h2>
-      <div class="text-3xl font-bold mt-2 flex items-center justify-center gap-2">
-        {{ statusText }}
+    <!-- Loading State -->
+    <div v-if="loading" class="px-4 -mt-4">
+      <div class="bg-white rounded-2xl p-8 shadow-sm border border-slate-100 text-center">
+        <van-loading size="28px" color="#6366f1" />
+        <p class="text-slate-400 mt-3 text-sm">正在掃描表單...</p>
       </div>
-      <p class="text-sm opacity-75 mt-2">
-        已掃描 {{ summary.tabsScanned || groupedReports.length || 0 }} 個分頁
-        ・最後更新：{{ lastUpdatedText }}
-      </p>
     </div>
 
-    <!-- Loading -->
-    <div v-if="loading" class="p-8 text-center">
-      <van-loading type="spinner" color="#1989fa" />
-      <p class="text-gray-500 mt-2">正在掃描報表...</p>
+    <!-- All Complete State (must check before Empty State) -->
+    <div v-else-if="hasValidData && summary.allCompleted && reports.length === 0" class="px-4 -mt-4">
+      <div class="bg-white rounded-2xl p-8 shadow-sm border border-slate-100 text-center">
+        <div class="text-5xl mb-4">🎉</div>
+        <p class="text-slate-800 font-bold text-lg">太棒了！</p>
+        <p class="text-slate-500 text-sm mt-1">所有表單皆已完成填寫</p>
+      </div>
     </div>
 
-    <!-- Empty State -->
-    <div v-else-if="!hasData && !error" class="p-8 text-center text-gray-500">
-      <van-icon name="notes-o" size="48" class="mb-4 opacity-50" />
-      <p class="text-lg">尚未設定關注報表</p>
-      <p class="text-sm mt-2">請前往「個人設定」新增報表</p>
+    <!-- Empty State (no forms set up / not registered) -->
+    <div v-else-if="needsSetup" class="px-4 -mt-4">
+      <div class="bg-white rounded-2xl p-8 shadow-sm border border-slate-100 text-center">
+        <div class="w-20 h-20 bg-indigo-100 rounded-2xl flex items-center justify-center mx-auto mb-5">
+          <van-icon name="user-circle-o" size="48" color="#6366f1" />
+        </div>
+        <p class="text-slate-800 font-bold text-xl mb-2">請先完成設定</p>
+        <p class="text-slate-500 text-sm mb-6">前往「個人設定」完成註冊<br/>並加入您要追蹤的表單</p>
+        <button
+          class="px-8 py-3 bg-gradient-to-r from-indigo-600 to-violet-600 text-white font-semibold rounded-xl shadow-lg active:scale-95 transition-transform"
+          @click="$router.push('/register')"
+        >
+          前往個人設定
+        </button>
+      </div>
     </div>
 
-    <!-- All Complete State -->
-    <div v-else-if="summary.allCompleted && reports.length === 0 && !loading" class="p-8 text-center">
-      <div class="text-6xl mb-4">🎉</div>
-      <p class="text-xl font-bold text-green-700">太棒了！</p>
-      <p class="text-gray-600 mt-2">您目前關注的報表皆已完成填寫</p>
-    </div>
-
-    <!-- Missing Reports List (Grouped by Sheet -> Tab) -->
-    <div v-else-if="groupedReports.length > 0" class="p-4 space-y-4">
-      <!-- Sheet Group -->
+    <!-- Reports List -->
+    <div v-else-if="groupedReports.length > 0" class="px-4 -mt-4 space-y-4">
+      <!-- Sheet Cards -->
       <div
-        v-for="(sheet, sheetIndex) in groupedReports"
+        v-for="sheet in groupedReports"
         :key="sheet.sheetId"
-        class="rounded-xl shadow-md overflow-hidden border-2"
-        :class="[
-          sheetIndex % 3 === 0 ? 'border-blue-200 bg-gradient-to-br from-blue-50 to-white' :
-          sheetIndex % 3 === 1 ? 'border-purple-200 bg-gradient-to-br from-purple-50 to-white' :
-          'border-teal-200 bg-gradient-to-br from-teal-50 to-white'
-        ]"
+        class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden"
       >
         <!-- Sheet Header -->
-        <div
-          class="flex items-center justify-between p-4 cursor-pointer transition-colors"
-          :class="[
-            sheetIndex % 3 === 0 ? 'hover:bg-blue-100/50' :
-            sheetIndex % 3 === 1 ? 'hover:bg-purple-100/50' :
-            'hover:bg-teal-100/50'
-          ]"
-          @click="toggleSheet(sheet.sheetId)"
-        >
+        <div class="px-4 py-3 border-b border-slate-100 flex items-center gap-3">
           <div class="flex-1 min-w-0">
-            <div class="flex items-center gap-2">
-              <van-icon
-                :name="isSheetExpanded(sheet.sheetId) ? 'arrow-down' : 'arrow'"
-                class="transition-transform"
-                :class="[
-                  sheetIndex % 3 === 0 ? 'text-blue-500' :
-                  sheetIndex % 3 === 1 ? 'text-purple-500' :
-                  'text-teal-500'
-                ]"
-              />
-              <span class="font-bold text-gray-800 text-lg">{{ sheet.sheetTitle }}</span>
+            <div class="flex items-center gap-2 mb-1.5">
+              <span class="text-lg">📊</span>
+              <p class="font-semibold text-slate-800 text-sm truncate">{{ sheet.sheetTitle }}</p>
             </div>
-            <a
-              :href="sheet.sheetUrl"
-              target="_blank"
-              class="inline-flex items-center gap-1 ml-6 mt-1 px-2 py-1 rounded-full text-xs font-medium transition-colors"
-              :class="[
-                sheetIndex % 3 === 0 ? 'bg-blue-100 text-blue-700 hover:bg-blue-200' :
-                sheetIndex % 3 === 1 ? 'bg-purple-100 text-purple-700 hover:bg-purple-200' :
-                'bg-teal-100 text-teal-700 hover:bg-teal-200'
-              ]"
-              @click.stop
-            >
-              <van-icon name="link-o" size="12" />
-              開啟 Google Sheet
-            </a>
+            <div class="flex items-center gap-2 ml-7">
+              <span v-if="sheet.missingCount > 0" class="text-xs bg-red-100 text-red-600 px-2 py-1 rounded-lg font-medium">
+                {{ sheet.missingCount }} 項未填
+              </span>
+              <span v-if="sheet.advisoryCount > 0" class="text-xs bg-amber-100 text-amber-600 px-2 py-1 rounded-lg font-medium">
+                {{ sheet.advisoryCount }} 待檢查
+              </span>
+            </div>
           </div>
-          <div class="flex items-center gap-2 flex-shrink-0">
-            <van-tag v-if="sheet.missingCount > 0" type="danger" size="medium" class="!font-bold">
-              {{ sheet.missingCount }} 項未填
-            </van-tag>
-            <van-tag v-if="sheet.advisoryCount > 0" type="warning" size="medium">
-              {{ sheet.advisoryCount }} 待檢查
-            </van-tag>
-          </div>
+          <a
+            :href="sheet.sheetUrl"
+            target="_blank"
+            class="text-sm text-indigo-600 font-medium flex items-center gap-1 bg-indigo-50 px-4 py-3 rounded-xl border border-indigo-200 flex-shrink-0"
+            @click.stop
+          >
+            🔗 開啟表單
+          </a>
         </div>
 
-        <!-- Tab List (Expanded) -->
-        <div v-show="isSheetExpanded(sheet.sheetId)" class="bg-white/80 border-t border-gray-200">
-          <div
-            v-for="tab in sheet.tabs"
-            :key="tab.tabName"
-            class="border-b border-gray-100 last:border-b-0"
-          >
-            <!-- Tab Header -->
-            <div
-              class="flex items-center justify-between px-4 py-3 pl-8 cursor-pointer hover:bg-gray-50 transition-colors"
-              @click="toggleTab(sheet.sheetId, tab.tabName)"
-            >
-              <div class="flex items-center gap-2 flex-1 min-w-0">
-                <van-icon
-                  :name="isTabExpanded(sheet.sheetId, tab.tabName) ? 'arrow-down' : 'arrow'"
-                  class="text-gray-300 text-sm"
-                />
-                <span class="text-gray-700 font-medium truncate">📄 {{ tab.tabName }}</span>
-              </div>
-              <div class="flex items-center gap-2 flex-shrink-0">
-                <span v-if="tab.missingCount > 0" class="text-red-500 text-sm font-medium">
-                  {{ tab.missingCount }} 筆未填
-                </span>
-                <span v-if="tab.advisories && tab.advisories.length > 0" class="text-yellow-600 text-sm">
-                  {{ tab.advisories.length }} 待檢查
-                </span>
-              </div>
-            </div>
+        <!-- Tabs -->
+        <div v-for="tab in sheet.tabs" :key="tab.tabName">
+          <!-- Tab Header -->
+          <div class="flex items-center bg-slate-50 border-l-4 border-indigo-400 px-4 py-2">
+            <span class="text-base mr-2">📄</span>
+            <span class="flex-1 text-sm font-medium text-slate-700 truncate">{{ tab.tabName }}</span>
+            <span v-if="tab.items.length > 0" class="text-xs bg-red-500 text-white px-2 py-0.5 rounded-full font-medium mr-1">
+              {{ tab.items.length }}
+            </span>
+            <span v-if="tab.advisories.length > 0" class="text-xs bg-amber-500 text-white px-2 py-0.5 rounded-full font-medium">
+              {{ tab.advisories.length }}
+            </span>
+          </div>
 
-            <!-- Missing Items + Advisories (Expanded) -->
-            <div
-              v-show="isTabExpanded(sheet.sheetId, tab.tabName)"
-              class="ml-8 mr-4 mb-3 space-y-3"
-            >
-              <!-- Missing Items (紅色區塊) -->
-              <div v-if="tab.items.length > 0" class="bg-red-50 px-4 py-3 rounded-lg">
-                <div
-                  v-for="item in tab.items"
-                  :key="item.id"
-                  class="mb-3 last:mb-0"
+          <!-- Items -->
+          <div class="border-l-4 border-transparent ml-4 border-l-slate-200">
+            <!-- Missing Items -->
+            <div v-for="item in tab.items" :key="item.id" class="bg-red-50 border-b border-red-100 last:border-b-0">
+              <div
+                class="px-4 py-3 flex items-center gap-3 cursor-pointer active:bg-red-100"
+                @click="toggleReportDetail(item.id)"
+              >
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-2">
+                    <span class="text-sm text-slate-800 font-medium">{{ item.missingFieldName }}</span>
+                    <span class="text-xs text-slate-400">{{ item.cellRef }}</span>
+                  </div>
+                </div>
+                <a
+                  :href="item.tabUrl || item.sheetUrl"
+                  target="_blank"
+                  class="text-xs text-indigo-600 font-medium flex-shrink-0 flex items-center gap-1 bg-indigo-50 px-3 py-1.5 rounded-lg border border-indigo-200"
+                  @click.stop
                 >
-                  <!-- Headline (一行摘要，點擊展開) -->
-                  <div
-                    class="bg-white rounded-lg border border-red-100 shadow-sm overflow-hidden"
-                  >
-                    <div
-                      class="flex items-center justify-between p-3 cursor-pointer hover:bg-red-50 transition-colors"
-                      @click="toggleReportDetail(item.id)"
-                    >
-                      <div class="flex items-center gap-2 flex-1 min-w-0">
-                        <van-icon name="warning" class="text-red-500 flex-shrink-0" />
-                        <span class="text-sm text-gray-800 truncate">{{ item.headline }}</span>
-                      </div>
-                      <van-icon
-                        :name="isReportExpanded(item.id) ? 'arrow-up' : 'arrow-down'"
-                        class="text-gray-400 flex-shrink-0"
-                      />
-                    </div>
-
-                    <!-- Detail Card (展開顯示四行卡片) -->
-                    <div
-                      v-show="isReportExpanded(item.id)"
-                      class="border-t border-red-100 p-3 bg-white text-sm space-y-2"
-                    >
-                      <div class="flex">
-                        <span class="text-gray-500 w-16 flex-shrink-0">Sheet</span>
-                        <a
-                          :href="item.sheetUrl"
-                          target="_blank"
-                          class="text-blue-600 hover:underline truncate"
-                        >
-                          {{ item.sheetTitle }}
-                        </a>
-                      </div>
-                      <div class="flex">
-                        <span class="text-gray-500 w-16 flex-shrink-0">Tab</span>
-                        <a
-                          :href="item.tabUrl"
-                          target="_blank"
-                          class="text-blue-600 hover:underline truncate"
-                        >
-                          {{ item.tabName }}
-                        </a>
-                      </div>
-                      <div class="flex">
-                        <span class="text-gray-500 w-16 flex-shrink-0">欄位</span>
-                        <span class="text-red-700 font-medium">
-                          {{ item.missingFieldName }}
-                          <span v-if="item.cellRef" class="text-gray-500">({{ item.cellRef }})</span>
-                        </span>
-                      </div>
-                      <div v-if="item.category" class="flex">
-                        <span class="text-gray-500 w-16 flex-shrink-0">分類</span>
-                        <span class="text-gray-700">{{ item.category }}</span>
-                      </div>
-                      <div v-if="item.aiSummary" class="flex">
-                        <span class="text-gray-500 w-16 flex-shrink-0">說明</span>
-                        <span class="text-gray-700">{{ item.aiSummary }}</span>
-                      </div>
-                    </div>
+                  前往分頁
+                </a>
+              </div>
+              <div v-show="isReportExpanded(item.id)" class="px-4 pb-3 pt-0 ml-7">
+                <div class="bg-white rounded-lg p-3 text-xs space-y-1.5 border border-red-100">
+                  <div v-if="item.category" class="flex gap-2">
+                    <span class="text-slate-400 w-8 flex-shrink-0">分類</span>
+                    <span class="text-slate-600">{{ item.category }}</span>
+                  </div>
+                  <div v-if="item.aiSummary" class="flex gap-2">
+                    <span class="text-slate-400 w-8 flex-shrink-0">說明</span>
+                    <span class="text-slate-600">{{ item.aiSummary }}</span>
                   </div>
                 </div>
               </div>
+            </div>
 
-              <!-- Advisories (黃色區塊，請自行檢查) -->
-              <div v-if="tab.advisories && tab.advisories.length > 0" class="bg-yellow-50 px-4 py-3 rounded-lg border border-yellow-200">
-                <div class="text-yellow-800 font-medium text-sm mb-2 flex items-center gap-1">
-                  <van-icon name="info-o" />
-                  請自行檢查
+            <!-- Advisories -->
+            <div v-for="(adv, advIdx) in tab.advisories" :key="`adv-${advIdx}`" class="bg-amber-50 border-b border-amber-100 last:border-b-0">
+              <div class="px-4 py-3 flex items-center gap-3">
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-2">
+                    <span class="text-sm text-slate-700">{{ adv.fieldName || '欄位' }}<span class="text-amber-600">（待檢查）</span></span>
+                    <span class="text-xs text-slate-400">{{ adv.cellRef }}</span>
+                  </div>
+                  <p class="text-xs text-amber-700 mt-1">{{ adv.note }}</p>
                 </div>
-                <div
-                  v-for="(adv, advIdx) in tab.advisories"
-                  :key="`adv-${advIdx}`"
-                  class="bg-white rounded-lg border border-yellow-100 p-3 mb-2 last:mb-0 text-sm text-gray-700"
+                <a
+                  :href="adv.tabUrl || adv.sheetUrl || '#'"
+                  target="_blank"
+                  class="text-xs text-indigo-600 font-medium flex-shrink-0 flex items-center gap-1 bg-indigo-50 px-3 py-1.5 rounded-lg border border-indigo-200"
+                  @click.stop
                 >
-                  {{ adv.note || adv }}
-                </div>
+                  前往分頁
+                </a>
               </div>
             </div>
           </div>
         </div>
       </div>
-    </div>
-
-    <!-- Actions -->
-    <div class="p-4">
-      <van-button block icon="replay" @click="checkStatus" :loading="loading" type="primary">
-        重新整理
-      </van-button>
     </div>
   </div>
 </template>

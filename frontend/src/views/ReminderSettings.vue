@@ -3,6 +3,7 @@ import { ref, reactive, onMounted, computed } from 'vue';
 import { showToast } from 'vant';
 import liff from '@line/liff';
 import { reminderApi, userApi } from '@/services/api';
+import { userState } from '@/stores/userState';
 
 // ============ Mock Mode ============
 // 🔧 設為 true 可在本地預覽已註冊使用者的 UI
@@ -99,16 +100,33 @@ const loadSettings = async () => {
       return;
     }
 
+    // 先檢查共享狀態是否已註冊（即時同步）
+    const sharedRegistered = userState.state.isRegistered;
+    
     // 先檢查是否已註冊
     try {
       const profileResponse = await userApi.getProfile(userId.value);
       if (profileResponse.success && profileResponse.data) {
         isRegistered.value = true;
+        // 同步到共享狀態
+        userState.setRegistered({
+          userId: userId.value,
+          realName: profileResponse.data.realName,
+          aliases: profileResponse.data.aliases,
+          sheetUrls: profileResponse.data.sheetUrls
+        });
+      } else if (sharedRegistered) {
+        // API 回傳空但共享狀態有記錄，仍視為已註冊
+        isRegistered.value = true;
       }
     } catch (e) {
-      // 使用者不存在
-      isRegistered.value = false;
-      return;
+      // API 失敗時，若共享狀態有記錄則視為已註冊
+      if (sharedRegistered) {
+        isRegistered.value = true;
+      } else {
+        isRegistered.value = false;
+        return;
+      }
     }
 
     // 取得提醒設定
@@ -227,13 +245,13 @@ onMounted(() => {
       <div class="text-center">
         <div class="text-4xl font-bold mb-1">
           <template v-if="loading">載入中...</template>
-          <template v-else-if="needsSetup">⚙️ 尚未設定</template>
+          <template v-else-if="needsSetup">⚙️ 首次使用</template>
           <template v-else-if="reminderSettings.enabled">🔔 已啟用</template>
           <template v-else>🔕 已關閉</template>
         </div>
         <p class="text-white/70 text-sm">
           <template v-if="loading">正在載入...</template>
-          <template v-else-if="needsSetup">請先完成個人設定</template>
+          <template v-else-if="needsSetup">請填寫資料以啟用監測功能</template>
           <template v-else-if="reminderSettings.enabled && reminderSettings.times.length > 0">
             {{ reminderSettings.times.length }} 個提醒時間
           </template>
@@ -270,8 +288,8 @@ onMounted(() => {
         <div class="w-20 h-20 bg-indigo-100 rounded-2xl flex items-center justify-center mx-auto mb-5">
           <van-icon name="user-circle-o" size="48" color="#6366f1" />
         </div>
-        <p class="text-slate-800 font-bold text-xl mb-2">請先完成設定</p>
-        <p class="text-slate-500 text-sm mb-6">前往「個人設定」完成註冊<br/>並加入您要追蹤的表單</p>
+        <p class="text-slate-800 font-bold text-xl mb-2">首次使用</p>
+        <p class="text-slate-500 text-sm mb-6">請填寫資料以啟用監測功能</p>
         <button
           class="px-8 py-3 bg-gradient-to-r from-indigo-600 to-violet-600 text-white font-semibold rounded-xl shadow-lg active:scale-95 transition-transform"
           @click="$router.push('/register')"

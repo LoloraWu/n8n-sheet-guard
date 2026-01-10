@@ -2,6 +2,7 @@
 import { ref, onMounted, computed } from 'vue';
 import liff from '@line/liff';
 import { reportApi } from '@/services/api';
+import { userState } from '@/stores/userState';
 
 // ============ Mock Mode ============
 const USE_MOCK = false; // 設為 true 使用假資料預覽
@@ -151,9 +152,18 @@ const getLiffUserId = async () => {
 const needsSetup = computed(() => {
   // 載入中不算
   if (loading.value) return false;
-  // 有錯誤（通常表示用戶未註冊）或 tabsScanned 為 0 都需要設定
-  if (error.value) return true;
-  return summary.value.tabsScanned === 0;
+  
+  // 檢查共享狀態是否有註冊記錄（即時同步）
+  const sharedRegistered = userState.state.isRegistered;
+  
+  // 有錯誤且共享狀態無註冊記錄時，需要設定
+  if (error.value && !sharedRegistered) return true;
+  
+  // 若共享狀態有註冊但 tabsScanned 為 0，可能是還沒設定表單
+  // 若沒有 error 但 tabsScanned 為 0 且無共享狀態註冊記錄，需要設定
+  if (summary.value.tabsScanned === 0 && !sharedRegistered) return true;
+  
+  return false;
 });
 
 // 是否有有效資料（已註冊且有掃描結果）
@@ -161,9 +171,16 @@ const hasValidData = computed(() => {
   return !loading.value && !error.value && summary.value.tabsScanned > 0;
 });
 
+// 是否已註冊但無表單
+const isRegisteredNoSheets = computed(() => {
+  const sharedRegistered = userState.state.isRegistered;
+  return !loading.value && !error.value && sharedRegistered && summary.value.tabsScanned === 0;
+});
+
 const statusText = computed(() => {
   if (loading.value) return '載入中...';
-  if (needsSetup.value) return '⚙️ 尚未設定';
+  if (needsSetup.value) return '⚙️ 首次使用';
+  if (isRegisteredNoSheets.value) return '📋 無關注表單';
   if (summary.value.allCompleted && summary.value.missing === 0) {
     return '✓ 全部完成';
   }
@@ -173,6 +190,7 @@ const statusText = computed(() => {
 const statusBgClass = computed(() => {
   if (loading.value) return 'bg-slate-500';
   if (needsSetup.value) return 'bg-slate-600';
+  if (isRegisteredNoSheets.value) return 'bg-amber-500';
   return summary.value.allCompleted ? 'bg-green-600' : 'bg-orange-500';
 });
 
@@ -337,6 +355,11 @@ const checkStatus = async () => {
 
     if (response && response.success) {
       const data = response.data;
+      
+      // 同步共享狀態（若有掃描到表單表示已註冊）
+      if (data.summary?.tabsScanned > 0) {
+        userState.setRegistered({ userId });
+      }
 
       // 新格式直接對應
       summary.value = data.summary || {
@@ -450,6 +473,7 @@ onMounted(() => {
       :class="[
         loading ? 'bg-gradient-to-br from-slate-500 to-slate-600' :
         needsSetup ? 'bg-gradient-to-br from-slate-600 to-slate-700' :
+        isRegisteredNoSheets ? 'bg-gradient-to-br from-amber-500 to-orange-600' :
         (summary.allCompleted && summary.missing === 0)
           ? 'bg-gradient-to-br from-emerald-500 to-teal-600'
           : 'bg-gradient-to-br from-indigo-600 to-violet-600'
@@ -472,7 +496,8 @@ onMounted(() => {
         </div>
         <p class="text-white/70 text-sm">
           <template v-if="loading">正在載入...</template>
-          <template v-else-if="needsSetup">請先完成個人設定</template>
+          <template v-else-if="needsSetup">請填寫資料以啟用監測功能</template>
+          <template v-else-if="isRegisteredNoSheets">請前往「個人設定」加入表單</template>
           <template v-else>已掃描 {{ summary.tabsScanned || 0 }} 個分頁 · {{ lastUpdatedText }}</template>
         </p>
       </div>
@@ -532,13 +557,30 @@ onMounted(() => {
         <div class="w-20 h-20 bg-indigo-100 rounded-2xl flex items-center justify-center mx-auto mb-5">
           <van-icon name="user-circle-o" size="48" color="#6366f1" />
         </div>
-        <p class="text-slate-800 font-bold text-xl mb-2">請先完成設定</p>
-        <p class="text-slate-500 text-sm mb-6">前往「個人設定」完成註冊<br/>並加入您要追蹤的表單</p>
+        <p class="text-slate-800 font-bold text-xl mb-2">首次使用</p>
+        <p class="text-slate-500 text-sm mb-6">請填寫資料以啟用監測功能</p>
         <button
           class="px-8 py-3 bg-gradient-to-r from-indigo-600 to-violet-600 text-white font-semibold rounded-xl shadow-lg active:scale-95 transition-transform"
           @click="$router.push('/register')"
         >
           前往個人設定
+        </button>
+      </div>
+    </div>
+
+    <!-- Registered but No Sheets State -->
+    <div v-else-if="isRegisteredNoSheets" class="px-4 -mt-4">
+      <div class="bg-white rounded-2xl p-8 shadow-sm border border-slate-100 text-center">
+        <div class="w-20 h-20 bg-amber-100 rounded-2xl flex items-center justify-center mx-auto mb-5">
+          <van-icon name="notes-o" size="48" color="#f59e0b" />
+        </div>
+        <p class="text-slate-800 font-bold text-xl mb-2">尚未設定關注表單</p>
+        <p class="text-slate-500 text-sm mb-6">請前往「個人設定」加入您要追蹤的表單</p>
+        <button
+          class="px-8 py-3 bg-gradient-to-r from-indigo-600 to-violet-600 text-white font-semibold rounded-xl shadow-lg active:scale-95 transition-transform"
+          @click="$router.push('/register')"
+        >
+          加入關注表單
         </button>
       </div>
     </div>
@@ -552,13 +594,15 @@ onMounted(() => {
         class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden"
       >
         <!-- Sheet Header -->
-        <div class="px-4 py-3 border-b border-slate-100 flex items-center gap-3">
-          <div class="flex-1 min-w-0">
-            <div class="flex items-center gap-2 mb-1.5">
-              <span class="text-lg">📊</span>
-              <p class="font-semibold text-slate-800 text-sm truncate">{{ sheet.sheetTitle }}</p>
-            </div>
-            <div class="flex items-center gap-2 ml-7">
+        <div class="px-4 py-3 border-b border-slate-100">
+          <!-- 表單標題列 -->
+          <div class="flex items-center gap-2 mb-2">
+            <span class="text-lg">📊</span>
+            <p class="font-semibold text-slate-800 text-sm truncate flex-1">{{ sheet.sheetTitle }}</p>
+          </div>
+          <!-- 狀態標籤 + 按鈕 -->
+          <div class="flex items-center justify-between gap-2 ml-7">
+            <div class="flex items-center gap-2 flex-wrap">
               <span v-if="sheet.missingCount > 0" class="text-xs bg-red-100 text-red-600 px-2 py-1 rounded-lg font-medium">
                 {{ sheet.missingCount }} 項未填
               </span>
@@ -566,15 +610,15 @@ onMounted(() => {
                 {{ sheet.advisoryCount }} 待檢查
               </span>
             </div>
+            <a
+              :href="sheet.sheetUrl"
+              target="_blank"
+              class="text-xs text-indigo-600 font-medium flex items-center gap-1 bg-indigo-50 px-3 py-2 rounded-lg border border-indigo-200 flex-shrink-0 whitespace-nowrap"
+              @click.stop
+            >
+              🔗 開啟
+            </a>
           </div>
-          <a
-            :href="sheet.sheetUrl"
-            target="_blank"
-            class="text-sm text-indigo-600 font-medium flex items-center gap-1 bg-indigo-50 px-4 py-3 rounded-xl border border-indigo-200 flex-shrink-0"
-            @click.stop
-          >
-            🔗 開啟表單
-          </a>
         </div>
 
         <!-- Tabs -->
@@ -596,33 +640,35 @@ onMounted(() => {
             <!-- Missing Items -->
             <div v-for="item in tab.items" :key="item.id" class="bg-red-50 border-b border-red-100 last:border-b-0">
               <div
-                class="px-4 py-3 flex items-center gap-3 cursor-pointer active:bg-red-100"
+                class="px-4 py-3 cursor-pointer active:bg-red-100"
                 @click="toggleReportDetail(item.id)"
               >
-                <div class="flex-1 min-w-0">
-                  <div class="flex items-center gap-2">
-                    <span class="text-sm text-slate-800 font-medium">{{ item.missingFieldName }}</span>
-                    <span class="text-xs text-slate-400">{{ item.cellRef }}</span>
+                <!-- 欄位名稱 + 儲存格 -->
+                <div class="flex items-center justify-between gap-2 mb-2">
+                  <div class="flex items-center gap-2 min-w-0 flex-1">
+                    <span class="text-sm text-slate-800 font-medium truncate">{{ item.missingFieldName }}</span>
+                    <span class="text-xs text-slate-400 flex-shrink-0">{{ item.cellRef }}</span>
                   </div>
                 </div>
+                <!-- 前往分頁按鈕（獨立一行，全寬） -->
                 <a
                   :href="item.tabUrl || item.sheetUrl"
                   target="_blank"
-                  class="text-xs text-indigo-600 font-medium flex-shrink-0 flex items-center gap-1 bg-indigo-50 px-3 py-1.5 rounded-lg border border-indigo-200"
+                  class="w-full text-xs text-indigo-600 font-medium flex items-center justify-center gap-1 bg-indigo-50 px-3 py-2 rounded-lg border border-indigo-200"
                   @click.stop
                 >
-                  前往分頁
+                  🔗 前往分頁填寫
                 </a>
               </div>
-              <div v-show="isReportExpanded(item.id)" class="px-4 pb-3 pt-0 ml-7">
+              <div v-show="isReportExpanded(item.id)" class="px-4 pb-3 pt-0">
                 <div class="bg-white rounded-lg p-3 text-xs space-y-1.5 border border-red-100">
                   <div v-if="item.category" class="flex gap-2">
-                    <span class="text-slate-400 w-8 flex-shrink-0">分類</span>
-                    <span class="text-slate-600">{{ item.category }}</span>
+                    <span class="text-slate-400 w-12 flex-shrink-0">分類</span>
+                    <span class="text-slate-600 break-all">{{ item.category }}</span>
                   </div>
                   <div v-if="item.aiSummary" class="flex gap-2">
-                    <span class="text-slate-400 w-8 flex-shrink-0">說明</span>
-                    <span class="text-slate-600">{{ item.aiSummary }}</span>
+                    <span class="text-slate-400 w-12 flex-shrink-0">說明</span>
+                    <span class="text-slate-600 break-all">{{ item.aiSummary }}</span>
                   </div>
                 </div>
               </div>
@@ -630,21 +676,22 @@ onMounted(() => {
 
             <!-- Advisories -->
             <div v-for="(adv, advIdx) in tab.advisories" :key="`adv-${advIdx}`" class="bg-amber-50 border-b border-amber-100 last:border-b-0">
-              <div class="px-4 py-3 flex items-center gap-3">
-                <div class="flex-1 min-w-0">
-                  <div class="flex items-center gap-2">
-                    <span class="text-sm text-slate-700">{{ adv.fieldName || '欄位' }}<span class="text-amber-600">（待檢查）</span></span>
-                    <span class="text-xs text-slate-400">{{ adv.cellRef }}</span>
-                  </div>
-                  <p class="text-xs text-amber-700 mt-1">{{ adv.note }}</p>
+              <div class="px-4 py-3">
+                <!-- 欄位名稱 + 儲存格 -->
+                <div class="flex items-center gap-2 mb-1">
+                  <span class="text-sm text-slate-700">{{ adv.fieldName || '欄位' }}<span class="text-amber-600">（待檢查）</span></span>
+                  <span class="text-xs text-slate-400">{{ adv.cellRef }}</span>
                 </div>
+                <!-- 說明文字 -->
+                <p class="text-xs text-amber-700 mb-2">{{ adv.note }}</p>
+                <!-- 前往分頁按鈕（獨立一行，全寬） -->
                 <a
                   :href="adv.tabUrl || adv.sheetUrl || '#'"
                   target="_blank"
-                  class="text-xs text-indigo-600 font-medium flex-shrink-0 flex items-center gap-1 bg-indigo-50 px-3 py-1.5 rounded-lg border border-indigo-200"
+                  class="w-full text-xs text-indigo-600 font-medium flex items-center justify-center gap-1 bg-indigo-50 px-3 py-2 rounded-lg border border-indigo-200"
                   @click.stop
                 >
-                  前往分頁
+                  🔗 前往分頁檢查
                 </a>
               </div>
             </div>

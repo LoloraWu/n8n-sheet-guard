@@ -3,6 +3,7 @@ import { ref, reactive, onMounted, computed } from 'vue';
 import { showToast } from 'vant';
 import liff from '@line/liff';
 import { userApi } from '@/services/api';
+import { userState } from '@/stores/userState';
 
 // State
 const form = reactive({
@@ -76,6 +77,13 @@ const loadExistingProfile = async () => {
       // 這樣即使沒有 sheetUrls 也會回填姓名和別名
       if (userData.realName || (userData.aliases && userData.aliases.length > 0)) {
         isExistingUser.value = true;
+        // 同步到共享狀態
+        userState.setRegistered({
+          userId: userId.value,
+          realName: userData.realName,
+          aliases: userData.aliases,
+          sheetUrls: userData.sheetUrls
+        });
 
         // 回填姓名（覆蓋預設的 LINE display name）
         if (userData.realName) {
@@ -358,6 +366,13 @@ const onSubmit = async () => {
             message: isExistingUser.value ? '設定已更新' : '註冊成功' 
           });
           isExistingUser.value = true;
+          // 同步到共享狀態（即時讓其他頁面知道）
+          userState.setRegistered({
+            userId: userId.value,
+            realName: form.realName,
+            aliases: form.aliases,
+            sheetUrls: form.sheetUrls
+          });
       } else if (!response || response === '') {
           // 後端回傳空內容 = 失敗
           showToast({ 
@@ -415,8 +430,8 @@ const onSubmit = async () => {
             <van-icon name="passed" size="22" color="#fff" />
           </div>
           <div class="flex-1 min-w-0">
-            <p class="font-semibold text-emerald-900 text-sm">已註冊</p>
-            <p class="text-emerald-700 text-xs mt-0.5">您可隨時修改以下設定</p>
+            <p class="font-semibold text-emerald-900 text-sm">您已註冊</p>
+            <p class="text-emerald-700 text-xs mt-0.5">可以更改以下資料</p>
           </div>
         </div>
       </div>
@@ -472,20 +487,21 @@ const onSubmit = async () => {
             <p v-else class="text-slate-400 text-sm mb-4">尚未設定別名</p>
 
             <!-- Add Alias Input -->
-            <div class="flex items-center gap-2">
+            <div class="flex flex-col gap-2">
               <input
                 v-model="newAlias"
                 type="text"
                 placeholder="輸入新別名"
-                class="flex-1 px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+                class="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
                 @keyup.enter="addAlias"
               />
               <button
                 type="button"
-                class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-xl hover:bg-blue-700 active:scale-[0.98] transition-transform"
+                class="w-full py-2.5 bg-blue-600 text-white text-sm font-medium rounded-xl hover:bg-blue-700 active:scale-[0.98] transition-transform"
                 @click="addAlias"
               >
-                新增
+                <van-icon name="plus" class="mr-1" />
+                新增別名
               </button>
             </div>
           </div>
@@ -493,15 +509,18 @@ const onSubmit = async () => {
 
         <!-- Section 3: Sheet URLs -->
         <div class="bg-white rounded-2xl shadow-sm border border-slate-200 mb-5 overflow-hidden">
-          <div class="flex items-center bg-slate-50 border-l-4 border-indigo-400 px-4 py-3">
-            <span class="text-lg mr-2">📊</span>
-            <div class="flex-1">
-              <h2 class="text-sm font-semibold text-slate-800">關注表單</h2>
-              <p class="text-xs text-slate-400 mt-0.5">系統會自動掃描所有分頁 <span class="text-amber-600">⚠️ 請確認 Google 表單已設定為『知道連結的人都可以檢視』</span></p>
+          <div class="bg-slate-50 border-l-4 border-indigo-400 px-4 py-3">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <span class="text-lg">📊</span>
+                <h2 class="text-sm font-semibold text-slate-800">關注表單</h2>
+              </div>
+              <span v-if="form.sheetUrls.length > 0" class="text-xs bg-emerald-500 text-white px-2 py-0.5 rounded-full font-medium flex-shrink-0">
+                {{ form.sheetUrls.length }}
+              </span>
             </div>
-            <span v-if="form.sheetUrls.length > 0" class="text-xs bg-emerald-500 text-white px-2 py-0.5 rounded-full font-medium">
-              {{ form.sheetUrls.length }}
-            </span>
+            <p class="text-xs text-slate-400 mt-1.5 ml-7">系統會自動掃描所有分頁</p>
+            <p class="text-xs text-amber-600 mt-1 ml-7">⚠️ 請確認表單已設為「知道連結的人都可以檢視」</p>
           </div>
 
           <!-- Sheet List -->
@@ -570,22 +589,22 @@ const onSubmit = async () => {
               </div>
               <div class="p-4 border-l-4 border-transparent ml-4 border-l-slate-200 bg-blue-50/30">
                 <!-- URL 輸入 + 驗證按鈕 -->
-                <div class="flex items-center gap-2 mb-3">
+                <div class="flex flex-col gap-2 mb-3">
                   <input
                     v-model="newSheetUrl"
                     type="text"
                     placeholder="Google 表單網址"
-                    class="flex-1 px-3 py-2.5 text-sm border border-slate-200 rounded-xl bg-white focus:outline-none focus:border-blue-400"
+                    class="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl bg-white focus:outline-none focus:border-blue-400"
                     @input="onSheetUrlChange"
                   />
                   <button
                     type="button"
-                    class="px-4 py-2.5 text-sm font-medium text-white bg-slate-600 rounded-xl hover:bg-slate-700 disabled:opacity-50 transition-colors whitespace-nowrap"
+                    class="w-full py-2.5 text-sm font-medium text-white bg-slate-600 rounded-xl hover:bg-slate-700 disabled:opacity-50 transition-colors"
                     :disabled="isValidating || !newSheetUrl.trim()"
                     @click="validateSheetUrl"
                   >
                     <van-loading v-if="isValidating" size="14" color="#fff" class="mr-1" />
-                    {{ isValidating ? '驗證中' : '驗證' }}
+                    {{ isValidating ? '驗證中...' : '🔍 驗證網址' }}
                   </button>
                 </div>
 

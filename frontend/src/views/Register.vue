@@ -340,8 +340,9 @@ const onSubmit = async () => {
       if (!userId.value) {
           showToast({
             message: '❌ 無法取得用戶資訊，請重新開啟頁面',
-            duration: 4000,
-            className: 'toast-fail'
+            duration: 3500,
+            className: 'toast-fail',
+            forbidClick: false
           });
           return;
       }
@@ -367,8 +368,9 @@ const onSubmit = async () => {
       if (response && response.success) {
           showToast({ 
             message: isExistingUser.value ? '✅ 設定已更新' : '🎉 註冊成功！',
-            duration: 4000,
-            className: 'toast-success'
+            duration: 3500,
+            className: 'toast-success',
+            forbidClick: false
           });
           isExistingUser.value = true;
           // 同步到共享狀態（即時讓其他頁面知道）
@@ -382,15 +384,17 @@ const onSubmit = async () => {
           // 後端回傳空內容 = 失敗
           showToast({ 
             message: '❌ 儲存失敗：伺服器無回應',
-            duration: 4000,
-            className: 'toast-fail'
+            duration: 3500,
+            className: 'toast-fail',
+            forbidClick: false
           });
       } else {
           // 有回應但不是成功
           showToast({ 
             message: '❌ ' + (response?.error || '儲存失敗，請稍後再試'),
-            duration: 4000,
-            className: 'toast-fail'
+            duration: 3500,
+            className: 'toast-fail',
+            forbidClick: false
           });
       }
       
@@ -398,8 +402,9 @@ const onSubmit = async () => {
       console.error('API Error:', error);
       showToast({ 
         message: '❌ ' + (error.message || '儲存失敗，請檢查網路連線'),
-        duration: 4000,
-        className: 'toast-fail'
+        duration: 3500,
+        className: 'toast-fail',
+        forbidClick: false
       });
   } finally {
       isLoading.value = false;

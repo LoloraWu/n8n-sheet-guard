@@ -159,8 +159,9 @@ const saveSettings = async () => {
       await new Promise(resolve => setTimeout(resolve, 500)); // 模擬延遲
       showToast({
         message: '✅ 設定已儲存',
-        duration: 4000,
-        className: 'toast-success'
+        duration: 3500,
+        className: 'toast-success',
+        forbidClick: false
       });
       return;
     }
@@ -174,22 +175,25 @@ const saveSettings = async () => {
     if (response.success) {
       showToast({
         message: '✅ 設定已儲存',
-        duration: 4000,
-        className: 'toast-success'
+        duration: 3500,
+        className: 'toast-success',
+        forbidClick: false
       });
     } else {
       showToast({
         message: '❌ ' + (response.error || '儲存失敗'),
-        duration: 4000,
-        className: 'toast-fail'
+        duration: 3500,
+        className: 'toast-fail',
+        forbidClick: false
       });
     }
   } catch (err) {
     console.error('Save settings error:', err);
     showToast({
       message: '❌ ' + (err.message || '儲存失敗'),
-      duration: 4000,
-      className: 'toast-fail'
+      duration: 3500,
+      className: 'toast-fail',
+      forbidClick: false
     });
   } finally {
     saving.value = false;

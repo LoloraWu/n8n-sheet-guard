@@ -239,7 +239,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// 刪除所有使用者 - 準備批次刪除\nconst users = $input.all().filter(item => item.json.Line_UID);\nconst replyToken = $('Check Pending Status').first().json.replyToken;\nconst userId = $('Check Pending Status').first().json.userId;\n\nif (users.length === 0) {\n  return [{ json: { replyToken, message: '📭 沒有需要清空的資料。', skipDelete: true } }];\n}\n\n// 輸出所有要刪除的 userId\nreturn users.map(u => ({ json: { \n  lineUid: u.json.Line_UID, \n  replyToken,\n  totalCount: users.length,\n  skipDelete: false\n} }));"
+        "jsCode": "// 刪除所有使用者 - 準備批次刪除\n// 過濾有效用戶（Line_UID 必須存在且不為空）\nconst users = $input.all().filter(item => {\n  const uid = item.json.Line_UID;\n  return uid && typeof uid === 'string' && uid.trim().length > 0;\n});\nconst replyToken = $('Check Pending Status').first().json.replyToken;\nconst userId = $('Check Pending Status').first().json.userId;\n\nif (users.length === 0) {\n  return [{ json: { replyToken, message: '📭 沒有需要清空的資料。', skipDelete: true } }];\n}\n\n// 輸出所有要刪除的用戶，包含 row_number 以確保精確刪除\nreturn users.map(u => ({ json: { \n  lineUid: u.json.Line_UID,\n  rowNumber: u.json.row_number,\n  replyToken,\n  totalCount: users.length,\n  skipDelete: false\n} }));"
       },
       "id": "code-prepare-clear-all",
       "name": "Prepare Clear All",
@@ -344,7 +344,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// /list-usr 格式化\nconst users = $input.all().filter(item => item.json.Line_UID);\nconst replyToken = $('Check Admin (list-usr)').first().json.replyToken;\n\nif (users.length === 0) {\n  return [{ json: { replyToken, message: '👥 目前沒有已註冊的使用者' } }];\n}\n\nlet list = users.map((item, idx) => {\n  const u = item.json;\n  const name = u.Real_Name || '（未命名）';\n  const uid = u.Line_UID.substring(0, 10) + '...';\n  let sheetCount = 0;\n  try {\n    if (u.Sheet_Urls_JSON) {\n      sheetCount = JSON.parse(u.Sheet_Urls_JSON).length;\n    }\n  } catch (e) {}\n  return (idx + 1) + '. ' + name + ' (' + uid + ') - ' + sheetCount + ' 個報表';\n}).join('\\n');\n\nconst message = '👥 已註冊使用者（共 ' + users.length + ' 人）\\n\\n' + list;\n\nreturn [{ json: { replyToken, message } }];"
+        "jsCode": "// /list-usr 格式化\n// 嚴格過濾：Line_UID 必須存在且不為空\nconst users = $input.all().filter(item => {\n  const uid = item.json.Line_UID;\n  return uid && typeof uid === 'string' && uid.trim().length > 0;\n});\nconst replyToken = $('Check Admin (list-usr)').first().json.replyToken;\n\nif (users.length === 0) {\n  return [{ json: { replyToken, message: '👥 目前沒有已註冊的使用者' } }];\n}\n\nlet list = users.map((item, idx) => {\n  const u = item.json;\n  const name = u.Real_Name || '（未命名）';\n  const uid = u.Line_UID.substring(0, 10) + '...';\n  let sheetCount = 0;\n  try {\n    if (u.Sheet_Urls_JSON) {\n      sheetCount = JSON.parse(u.Sheet_Urls_JSON).length;\n    }\n  } catch (e) {}\n  return (idx + 1) + '. ' + name + ' (' + uid + ') - ' + sheetCount + ' 個報表';\n}).join('\\n');\n\nconst message = '👥 已註冊使用者（共 ' + users.length + ' 人）\\n\\n' + list;\n\nreturn [{ json: { replyToken, message } }];"
       },
       "id": "code-format-list-usr",
       "name": "Format list-usr",

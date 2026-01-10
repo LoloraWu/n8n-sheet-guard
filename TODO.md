@@ -29,7 +29,7 @@
 | Workflow A | `backend/workflow-a-user-api-v2.json` | 匯入 n8n | ✅ |
 | Workflow B | `backend/workflow-b-report-api-v2.json` | 匯入 n8n | ✅ |
 | Workflow C | `backend/workflow-c-cron-notifier-v2.json` | 匯入 n8n | ✅ |
-| Workflow D | `backend/workflow-d-line-bot-commands.json` | 匯入 n8n | ✅ |
+| Workflow D | `backend/workflow-d-line-bot-commands.json` | 匯入 n8n | ⏳ 需重新部署（v3 修復） |
 | 前端 | `frontend/` | `npm run build && npx vercel --prod` | ⏳ 需重新部署 |
 
 ---
@@ -493,6 +493,58 @@ https://lorawu.app.n8n.cloud/webhook/line-webhook
 - [ ] `/del-usr {userId}` - 刪除指定使用者
 - [ ] `/clear-me` - 清空管理者自己資料（需 YES 確認）
 - [ ] `/clear-all` - 清空所有資料（需 YES 確認）
+
+---
+
+## 🐛 本次修復（2026-01-10 v3 - /clear-all 與 /del-usr 刪除問題）
+
+### 問題描述
+`/clear-all` 和 `/del-usr` 指令顯示成功但實際上沒有刪除資料。原因是 Google Sheets 有空白列時，n8n 的 `delete` 操作無法正確找到目標資料列。
+
+### 根本原因
+- Google Sheet `Master_Sync` 中有大量空白列（如第2-100列為空，實際資料在第101列）
+- n8n Google Sheets node 的 `delete` 操作使用 `lookupColumn`/`lookupValue` 過濾器時，無法正確處理有空白列的情況
+
+### 解決方案
+改用 **HTTP Request** 直接呼叫 **Google Sheets API `batchUpdate`** 以 `deleteDimension` 刪除指定列：
+
+1. **`/clear-all`** 流程重構：
+   - 新增 `Get Sheet Info` 節點：取得 sheetId 和 rowCount
+   - 修改 `Prepare Clear All` 節點：建立 batchUpdate 刪除請求
+   - 新增 `Delete All Rows` 節點：呼叫 API 刪除第2列到最後一列
+
+2. **`/del-usr`** 流程重構：
+   - 新增 `Read All Users (del)` 節點：讀取所有使用者（包含 row_number）
+   - 新增 `Find User Row` 節點：用 Line_UID 找到目標並取得其 row_number
+   - 新增 `User Found?` 節點：判斷是否找到使用者
+   - 新增 `Get Sheet Info (del)` 節點：取得 sheetId
+   - 新增 `Prepare Delete User` 節點：建立單列刪除請求
+   - 新增 `Delete User Row` 節點：呼叫 API 刪除指定列
+
+### 修改的檔案
+
+| 檔案 | 修改內容 |
+|------|----------|
+| `backend/workflow-d-line-bot-commands.json` | 重構 /clear-all 和 /del-usr 刪除邏輯，改用 HTTP Request 呼叫 Google Sheets API |
+
+### Google Sheets API 使用方式
+
+```javascript
+// batchUpdate 刪除列請求
+POST https://sheets.googleapis.com/v4/spreadsheets/{spreadsheetId}:batchUpdate
+{
+  "requests": [{
+    "deleteDimension": {
+      "range": {
+        "sheetId": 0,           // 從 sheets.properties 取得
+        "dimension": "ROWS",
+        "startIndex": 1,        // 0-indexed（所以 1 = 第2列）
+        "endIndex": rowCount    // 刪除到最後
+      }
+    }
+  }]
+}
+```
 
 ---
 

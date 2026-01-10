@@ -157,9 +157,8 @@ const saveSettings = async () => {
     if (USE_MOCK) {
       console.log('🔧 Mock 模式：模擬儲存', { enabled: reminderSettings.enabled, times: reminderSettings.times });
       await new Promise(resolve => setTimeout(resolve, 500)); // 模擬延遲
-      showToast({ 
-        type: 'success', 
-        message: '設定已儲存',
+      showToast({
+        message: '✅ 設定已儲存',
         duration: 4000,
         className: 'toast-success'
       });
@@ -173,25 +172,22 @@ const saveSettings = async () => {
     });
 
     if (response.success) {
-      showToast({ 
-        type: 'success', 
-        message: '設定已儲存',
+      showToast({
+        message: '✅ 設定已儲存',
         duration: 4000,
         className: 'toast-success'
       });
     } else {
-      showToast({ 
-        type: 'fail', 
-        message: response.error || '儲存失敗',
+      showToast({
+        message: '❌ ' + (response.error || '儲存失敗'),
         duration: 4000,
         className: 'toast-fail'
       });
     }
   } catch (err) {
     console.error('Save settings error:', err);
-    showToast({ 
-      type: 'fail', 
-      message: err.message || '儲存失敗',
+    showToast({
+      message: '❌ ' + (err.message || '儲存失敗'),
       duration: 4000,
       className: 'toast-fail'
     });

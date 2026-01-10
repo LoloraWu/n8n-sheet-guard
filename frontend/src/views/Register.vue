@@ -275,7 +275,7 @@ const addSheet = () => {
     newSheetUrl.value = '';
     validationResult.value = null;
     
-    showToast({ type: 'success', message: '已加入關注表單', duration: 3000, className: 'toast-success' });
+    showToast({ message: '✅ 已加入關注表單', duration: 3000, className: 'toast-success' });
   }
 };
 
@@ -301,7 +301,7 @@ const addSheetFromPicker = () => {
 
   selectedSheetId.value = '';
   showSheetPicker.value = false;
-  showToast({ type: 'success', message: '已加入關注表單', duration: 3000, className: 'toast-success' });
+  showToast({ message: '✅ 已加入關注表單', duration: 3000, className: 'toast-success' });
 };
 
 // 縮短 URL 顯示
@@ -338,9 +338,8 @@ const onSubmit = async () => {
       // 嘗試重新取得 userId
       userId.value = await getLiffUserId();
       if (!userId.value) {
-          showToast({ 
-            type: 'fail', 
-            message: '無法取得用戶資訊，請重新開啟頁面',
+          showToast({
+            message: '❌ 無法取得用戶資訊，請重新開啟頁面',
             duration: 4000,
             className: 'toast-fail'
           });
@@ -367,8 +366,7 @@ const onSubmit = async () => {
       // 檢查回應是否有效
       if (response && response.success) {
           showToast({ 
-            type: 'success', 
-            message: isExistingUser.value ? '設定已更新' : '註冊成功！',
+            message: isExistingUser.value ? '✅ 設定已更新' : '🎉 註冊成功！',
             duration: 4000,
             className: 'toast-success'
           });
@@ -383,16 +381,14 @@ const onSubmit = async () => {
       } else if (!response || response === '') {
           // 後端回傳空內容 = 失敗
           showToast({ 
-            type: 'fail', 
-            message: '儲存失敗：伺服器無回應',
+            message: '❌ 儲存失敗：伺服器無回應',
             duration: 4000,
             className: 'toast-fail'
           });
       } else {
           // 有回應但不是成功
           showToast({ 
-            type: 'fail', 
-            message: response?.error || '儲存失敗，請稍後再試',
+            message: '❌ ' + (response?.error || '儲存失敗，請稍後再試'),
             duration: 4000,
             className: 'toast-fail'
           });
@@ -401,8 +397,7 @@ const onSubmit = async () => {
   } catch (error) {
       console.error('API Error:', error);
       showToast({ 
-        type: 'fail', 
-        message: error.message || '儲存失敗，請檢查網路連線',
+        message: '❌ ' + (error.message || '儲存失敗，請檢查網路連線'),
         duration: 4000,
         className: 'toast-fail'
       });

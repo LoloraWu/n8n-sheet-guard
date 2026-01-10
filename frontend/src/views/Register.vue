@@ -1,6 +1,6 @@
 <script setup>
 import { ref, reactive, onMounted, computed } from 'vue';
-import { showToast, showNotify } from 'vant';
+import { showNotify } from 'vant';
 import 'vant/es/notify/style';
 import liff from '@line/liff';
 import { userApi } from '@/services/api';
@@ -203,7 +203,7 @@ const validateSheetUrl = async () => {
   const url = newSheetUrl.value.trim();
   
   if (!url) {
-    showToast({ message: '請先輸入 Google 表單網址', duration: 2500, className: 'toast-info' });
+    showNotify({ type: 'warning', message: '請先輸入 Google 表單網址', duration: 2500, className: 'notify-big' });
     return;
   }
 
@@ -247,13 +247,13 @@ const addSheet = () => {
   if (newSheetUrl.value.trim()) {
     // 基本 URL 格式檢查
     if (!newSheetUrl.value.includes('docs.google.com/spreadsheets')) {
-      showToast({ message: '請輸入有效的 Google 表單網址', duration: 2500, className: 'toast-info' });
+      showNotify({ type: 'warning', message: '請輸入有效的 Google 表單網址', duration: 2500, className: 'notify-big' });
       return;
     }
 
     // 檢查是否已驗證成功
     if (!validationResult.value?.success) {
-      showToast({ message: '請先驗證表單網址', duration: 2500, className: 'toast-info' });
+      showNotify({ type: 'warning', message: '請先驗證表單網址', duration: 2500, className: 'notify-big' });
       return;
     }
 
@@ -262,7 +262,7 @@ const addSheet = () => {
       s.url.includes(validationResult.value.spreadsheetId)
     );
     if (alreadyExists) {
-      showToast({ message: '此表單已在關注列表中', duration: 2500, className: 'toast-info' });
+      showNotify({ type: 'warning', message: '此表單已在關注列表中', duration: 2500, className: 'notify-big' });
       return;
     }
 
@@ -276,7 +276,7 @@ const addSheet = () => {
     newSheetUrl.value = '';
     validationResult.value = null;
     
-    showToast({ message: '✅ 已加入關注表單', duration: 3000, className: 'toast-success' });
+    showNotify({ type: 'success', message: '✅ 已加入關注表單', duration: 3000, className: 'notify-big' });
   }
 };
 
@@ -290,7 +290,7 @@ const addSheetFromPicker = () => {
   // 檢查是否已經加入
   const alreadyExists = form.sheetUrls.some(s => s.url.includes(sheet.spreadsheetId));
   if (alreadyExists) {
-    showToast({ message: '此表單已在關注列表中', duration: 2500, className: 'toast-info' });
+    showNotify({ type: 'warning', message: '此表單已在關注列表中', duration: 2500, className: 'notify-big' });
     return;
   }
 
@@ -302,7 +302,7 @@ const addSheetFromPicker = () => {
 
   selectedSheetId.value = '';
   showSheetPicker.value = false;
-  showToast({ message: '✅ 已加入關注表單', duration: 3000, className: 'toast-success' });
+  showNotify({ type: 'success', message: '✅ 已加入關注表單', duration: 3000, className: 'notify-big' });
 };
 
 // 縮短 URL 顯示
@@ -330,7 +330,7 @@ const removeSheet = (index) => {
 
 const onSubmit = async () => {
   if (!form.realName) {
-      showToast({ message: '請填寫真實姓名', duration: 2500, className: 'toast-info' });
+      showNotify({ type: 'warning', message: '請填寫真實姓名', duration: 2500, className: 'notify-big' });
       return;
   }
 
@@ -339,11 +339,11 @@ const onSubmit = async () => {
       // 嘗試重新取得 userId
       userId.value = await getLiffUserId();
       if (!userId.value) {
-          showToast({
+          showNotify({
+            type: 'danger',
             message: '❌ 無法取得用戶資訊，請重新開啟頁面',
             duration: 3500,
-            className: 'toast-fail',
-            forbidClick: false
+            className: 'notify-big'
           });
           return;
       }

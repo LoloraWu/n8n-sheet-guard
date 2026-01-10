@@ -4,22 +4,35 @@
 @source "../index.html";
 @source "./**/*.{vue,js,ts,jsx,tsx}";
 
-/* ===== Notify 大尺寸樣式 ===== */
+/* ===== Notify 超大尺寸樣式 - 佔據畫面 1/3 ===== */
 .notify-big {
-  --van-notify-font-size: 20px !important;
-  --van-notify-line-height: 1.6 !important;
-  --van-notify-padding: 24px 20px !important;
-  font-weight: 600 !important;
-  letter-spacing: 0.5px !important;
-  min-height: 80px !important;
+  --van-notify-font-size: 24px !important;
+  --van-notify-line-height: 1.8 !important;
+  --van-notify-padding: 60px 24px !important;
+  font-weight: 700 !important;
+  letter-spacing: 1px !important;
+  min-height: 30vh !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  text-align: center !important;
+}
+
+/* 響應式 - 小螢幕手機 */
+@media (max-width: 380px) {
+  .notify-big {
+    --van-notify-font-size: 22px !important;
+    --van-notify-padding: 50px 20px !important;
+    min-height: 28vh !important;
+  }
 }
 
 /* 響應式 - 大螢幕 */
 @media (min-width: 500px) {
   .notify-big {
-    --van-notify-font-size: 22px !important;
-    --van-notify-padding: 28px 24px !important;
-    min-height: 100px !important;
+    --van-notify-font-size: 28px !important;
+    --van-notify-padding: 70px 28px !important;
+    min-height: 32vh !important;
   }
 }
 

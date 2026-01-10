@@ -275,7 +275,7 @@ const addSheet = () => {
     newSheetUrl.value = '';
     validationResult.value = null;
     
-    showToast({ type: 'success', message: '✓ 已加入關注表單', duration: 2500, className: 'toast-success' });
+    showToast({ type: 'success', message: '已加入關注表單', duration: 3000, className: 'toast-success' });
   }
 };
 
@@ -301,7 +301,7 @@ const addSheetFromPicker = () => {
 
   selectedSheetId.value = '';
   showSheetPicker.value = false;
-  showToast({ type: 'success', message: '✓ 已加入關注表單', duration: 2500, className: 'toast-success' });
+  showToast({ type: 'success', message: '已加入關注表單', duration: 3000, className: 'toast-success' });
 };
 
 // 縮短 URL 顯示
@@ -341,7 +341,7 @@ const onSubmit = async () => {
           showToast({ 
             type: 'fail', 
             message: '無法取得用戶資訊，請重新開啟頁面',
-            duration: 3500,
+            duration: 4000,
             className: 'toast-fail'
           });
           return;
@@ -368,8 +368,8 @@ const onSubmit = async () => {
       if (response && response.success) {
           showToast({ 
             type: 'success', 
-            message: isExistingUser.value ? '✓ 設定已更新' : '🎉 註冊成功',
-            duration: 3500,
+            message: isExistingUser.value ? '設定已更新' : '註冊成功！',
+            duration: 4000,
             className: 'toast-success'
           });
           isExistingUser.value = true;
@@ -385,7 +385,7 @@ const onSubmit = async () => {
           showToast({ 
             type: 'fail', 
             message: '儲存失敗：伺服器無回應',
-            duration: 3500,
+            duration: 4000,
             className: 'toast-fail'
           });
       } else {
@@ -393,7 +393,7 @@ const onSubmit = async () => {
           showToast({ 
             type: 'fail', 
             message: response?.error || '儲存失敗，請稍後再試',
-            duration: 3500,
+            duration: 4000,
             className: 'toast-fail'
           });
       }
@@ -403,7 +403,7 @@ const onSubmit = async () => {
       showToast({ 
         type: 'fail', 
         message: error.message || '儲存失敗，請檢查網路連線',
-        duration: 3500,
+        duration: 4000,
         className: 'toast-fail'
       });
   } finally {

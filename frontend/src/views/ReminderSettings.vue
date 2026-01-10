@@ -159,8 +159,8 @@ const saveSettings = async () => {
       await new Promise(resolve => setTimeout(resolve, 500)); // 模擬延遲
       showToast({ 
         type: 'success', 
-        message: '✓ 設定已儲存（Mock）',
-        duration: 3500,
+        message: '設定已儲存',
+        duration: 4000,
         className: 'toast-success'
       });
       return;
@@ -175,15 +175,15 @@ const saveSettings = async () => {
     if (response.success) {
       showToast({ 
         type: 'success', 
-        message: '✓ 設定已儲存',
-        duration: 3500,
+        message: '設定已儲存',
+        duration: 4000,
         className: 'toast-success'
       });
     } else {
       showToast({ 
         type: 'fail', 
         message: response.error || '儲存失敗',
-        duration: 3500,
+        duration: 4000,
         className: 'toast-fail'
       });
     }
@@ -192,7 +192,7 @@ const saveSettings = async () => {
     showToast({ 
       type: 'fail', 
       message: err.message || '儲存失敗',
-      duration: 3500,
+      duration: 4000,
       className: 'toast-fail'
     });
   } finally {

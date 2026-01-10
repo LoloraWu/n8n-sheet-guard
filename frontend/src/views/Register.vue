@@ -202,7 +202,7 @@ const validateSheetUrl = async () => {
   const url = newSheetUrl.value.trim();
   
   if (!url) {
-    showToast('請先輸入 Google 表單網址');
+    showToast({ message: '請先輸入 Google 表單網址', duration: 2500, className: 'toast-info' });
     return;
   }
 
@@ -246,13 +246,13 @@ const addSheet = () => {
   if (newSheetUrl.value.trim()) {
     // 基本 URL 格式檢查
     if (!newSheetUrl.value.includes('docs.google.com/spreadsheets')) {
-      showToast('請輸入有效的 Google 表單網址');
+      showToast({ message: '請輸入有效的 Google 表單網址', duration: 2500, className: 'toast-info' });
       return;
     }
 
     // 檢查是否已驗證成功
     if (!validationResult.value?.success) {
-      showToast('請先驗證表單網址');
+      showToast({ message: '請先驗證表單網址', duration: 2500, className: 'toast-info' });
       return;
     }
 
@@ -261,7 +261,7 @@ const addSheet = () => {
       s.url.includes(validationResult.value.spreadsheetId)
     );
     if (alreadyExists) {
-      showToast('此表單已在關注列表中');
+      showToast({ message: '此表單已在關注列表中', duration: 2500, className: 'toast-info' });
       return;
     }
 
@@ -275,7 +275,7 @@ const addSheet = () => {
     newSheetUrl.value = '';
     validationResult.value = null;
     
-    showToast({ type: 'success', message: '已加入關注表單' });
+    showToast({ type: 'success', message: '✓ 已加入關注表單', duration: 2500, className: 'toast-success' });
   }
 };
 
@@ -289,7 +289,7 @@ const addSheetFromPicker = () => {
   // 檢查是否已經加入
   const alreadyExists = form.sheetUrls.some(s => s.url.includes(sheet.spreadsheetId));
   if (alreadyExists) {
-    showToast('此表單已在關注列表中');
+    showToast({ message: '此表單已在關注列表中', duration: 2500, className: 'toast-info' });
     return;
   }
 
@@ -301,7 +301,7 @@ const addSheetFromPicker = () => {
 
   selectedSheetId.value = '';
   showSheetPicker.value = false;
-  showToast({ type: 'success', message: '已加入關注表單' });
+  showToast({ type: 'success', message: '✓ 已加入關注表單', duration: 2500, className: 'toast-success' });
 };
 
 // 縮短 URL 顯示
@@ -329,7 +329,7 @@ const removeSheet = (index) => {
 
 const onSubmit = async () => {
   if (!form.realName) {
-      showToast('請填寫真實姓名');
+      showToast({ message: '請填寫真實姓名', duration: 2500, className: 'toast-info' });
       return;
   }
 
@@ -338,7 +338,12 @@ const onSubmit = async () => {
       // 嘗試重新取得 userId
       userId.value = await getLiffUserId();
       if (!userId.value) {
-          showToast({ type: 'fail', message: '無法取得用戶資訊，請重新開啟頁面' });
+          showToast({ 
+            type: 'fail', 
+            message: '無法取得用戶資訊，請重新開啟頁面',
+            duration: 3500,
+            className: 'toast-fail'
+          });
           return;
       }
   }
@@ -363,7 +368,9 @@ const onSubmit = async () => {
       if (response && response.success) {
           showToast({ 
             type: 'success', 
-            message: isExistingUser.value ? '設定已更新' : '註冊成功' 
+            message: isExistingUser.value ? '✓ 設定已更新' : '🎉 註冊成功',
+            duration: 3500,
+            className: 'toast-success'
           });
           isExistingUser.value = true;
           // 同步到共享狀態（即時讓其他頁面知道）
@@ -377,19 +384,28 @@ const onSubmit = async () => {
           // 後端回傳空內容 = 失敗
           showToast({ 
             type: 'fail', 
-            message: '儲存失敗：伺服器無回應' 
+            message: '儲存失敗：伺服器無回應',
+            duration: 3500,
+            className: 'toast-fail'
           });
       } else {
           // 有回應但不是成功
           showToast({ 
             type: 'fail', 
-            message: response?.error || '儲存失敗，請稍後再試' 
+            message: response?.error || '儲存失敗，請稍後再試',
+            duration: 3500,
+            className: 'toast-fail'
           });
       }
       
   } catch (error) {
       console.error('API Error:', error);
-      showToast({ type: 'fail', message: error.message || '儲存失敗，請檢查網路連線' });
+      showToast({ 
+        type: 'fail', 
+        message: error.message || '儲存失敗，請檢查網路連線',
+        duration: 3500,
+        className: 'toast-fail'
+      });
   } finally {
       isLoading.value = false;
   }

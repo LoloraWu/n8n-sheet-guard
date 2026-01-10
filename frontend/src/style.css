@@ -3,3 +3,60 @@
 /* Source paths for Tailwind v4 */
 @source "../index.html";
 @source "./**/*.{vue,js,ts,jsx,tsx}";
+
+/* ===== Custom Toast Styles ===== */
+/* 成功提示框 - 更醒目的綠色風格 */
+.toast-success {
+  --van-toast-max-width: 85% !important;
+  --van-toast-font-size: 15px !important;
+  --van-toast-text-padding: 16px 24px !important;
+  --van-toast-icon-size: 48px !important;
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%) !important;
+  box-shadow: 0 10px 40px rgba(16, 185, 129, 0.4), 0 4px 12px rgba(0, 0, 0, 0.1) !important;
+  border-radius: 16px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.5px !important;
+  animation: toast-bounce-in 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55) !important;
+}
+
+/* 失敗提示框 - 醒目的紅色風格 */
+.toast-fail {
+  --van-toast-max-width: 85% !important;
+  --van-toast-font-size: 15px !important;
+  --van-toast-text-padding: 16px 24px !important;
+  --van-toast-icon-size: 48px !important;
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%) !important;
+  box-shadow: 0 10px 40px rgba(239, 68, 68, 0.4), 0 4px 12px rgba(0, 0, 0, 0.1) !important;
+  border-radius: 16px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.5px !important;
+  animation: toast-bounce-in 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55) !important;
+}
+
+/* 一般提示框 */
+.toast-info {
+  --van-toast-max-width: 85% !important;
+  --van-toast-font-size: 15px !important;
+  --van-toast-text-padding: 16px 24px !important;
+  background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%) !important;
+  box-shadow: 0 10px 40px rgba(99, 102, 241, 0.4), 0 4px 12px rgba(0, 0, 0, 0.1) !important;
+  border-radius: 16px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.5px !important;
+  animation: toast-bounce-in 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55) !important;
+}
+
+/* Toast 彈跳動畫 */
+@keyframes toast-bounce-in {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.5);
+  }
+  50% {
+    transform: translate(-50%, -50%) scale(1.05);
+  }
+  100% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}

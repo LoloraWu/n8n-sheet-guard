@@ -1,6 +1,7 @@
 <script setup>
 import { ref, reactive, onMounted, computed } from 'vue';
-import { showToast, closeToast } from 'vant';
+import { showToast, showNotify } from 'vant';
+import 'vant/es/notify/style';
 import liff from '@line/liff';
 import { userApi } from '@/services/api';
 import { userState } from '@/stores/userState';
@@ -366,13 +367,12 @@ const onSubmit = async () => {
       
       // 檢查回應是否有效
       if (response && response.success) {
-          showToast({ 
+          showNotify({
+            type: 'success',
             message: isExistingUser.value ? '✅ 設定已更新' : '🎉 註冊成功！',
-            duration: 0,
-            className: 'toast-success',
-            forbidClick: false
+            duration: 3500,
+            className: 'notify-big'
           });
-          setTimeout(() => closeToast(), 3500);
           isExistingUser.value = true;
           // 同步到共享狀態（即時讓其他頁面知道）
           userState.setRegistered({
@@ -383,33 +383,30 @@ const onSubmit = async () => {
           });
       } else if (!response || response === '') {
           // 後端回傳空內容 = 失敗
-          showToast({ 
+          showNotify({
+            type: 'danger',
             message: '❌ 儲存失敗：伺服器無回應',
-            duration: 0,
-            className: 'toast-fail',
-            forbidClick: false
+            duration: 3500,
+            className: 'notify-big'
           });
-          setTimeout(() => closeToast(), 3500);
       } else {
           // 有回應但不是成功
-          showToast({ 
+          showNotify({
+            type: 'danger',
             message: '❌ ' + (response?.error || '儲存失敗，請稍後再試'),
-            duration: 0,
-            className: 'toast-fail',
-            forbidClick: false
+            duration: 3500,
+            className: 'notify-big'
           });
-          setTimeout(() => closeToast(), 3500);
       }
       
   } catch (error) {
       console.error('API Error:', error);
-      showToast({ 
+      showNotify({
+        type: 'danger',
         message: '❌ ' + (error.message || '儲存失敗，請檢查網路連線'),
-        duration: 0,
-        className: 'toast-fail',
-        forbidClick: false
+        duration: 3500,
+        className: 'notify-big'
       });
-      setTimeout(() => closeToast(), 3500);
   } finally {
       isLoading.value = false;
   }

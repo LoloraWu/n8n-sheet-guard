@@ -1,6 +1,7 @@
 <script setup>
 import { ref, reactive, onMounted, computed } from 'vue';
-import { showToast, closeToast } from 'vant';
+import { showNotify } from 'vant';
+import 'vant/es/notify/style';
 import liff from '@line/liff';
 import { reminderApi, userApi } from '@/services/api';
 import { userState } from '@/stores/userState';
@@ -157,13 +158,12 @@ const saveSettings = async () => {
     if (USE_MOCK) {
       console.log('🔧 Mock 模式：模擬儲存', { enabled: reminderSettings.enabled, times: reminderSettings.times });
       await new Promise(resolve => setTimeout(resolve, 500)); // 模擬延遲
-      showToast({
+      showNotify({
+        type: 'success',
         message: '✅ 設定已儲存',
-        duration: 0,
-        className: 'toast-success',
-        forbidClick: false
+        duration: 3500,
+        className: 'notify-big'
       });
-      setTimeout(() => closeToast(), 3500);
       return;
     }
 
@@ -174,31 +174,28 @@ const saveSettings = async () => {
     });
 
     if (response.success) {
-      showToast({
+      showNotify({
+        type: 'success',
         message: '✅ 設定已儲存',
-        duration: 0,
-        className: 'toast-success',
-        forbidClick: false
+        duration: 3500,
+        className: 'notify-big'
       });
-      setTimeout(() => closeToast(), 3500);
     } else {
-      showToast({
+      showNotify({
+        type: 'danger',
         message: '❌ ' + (response.error || '儲存失敗'),
-        duration: 0,
-        className: 'toast-fail',
-        forbidClick: false
+        duration: 3500,
+        className: 'notify-big'
       });
-      setTimeout(() => closeToast(), 3500);
     }
   } catch (err) {
     console.error('Save settings error:', err);
-    showToast({
+    showNotify({
+      type: 'danger',
       message: '❌ ' + (err.message || '儲存失敗'),
-      duration: 0,
-      className: 'toast-fail',
-      forbidClick: false
+      duration: 3500,
+      className: 'notify-big'
     });
-    setTimeout(() => closeToast(), 3500);
   } finally {
     saving.value = false;
   }

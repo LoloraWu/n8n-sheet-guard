@@ -4,6 +4,25 @@
 @source "../index.html";
 @source "./**/*.{vue,js,ts,jsx,tsx}";
 
+/* ===== Notify 大尺寸樣式 ===== */
+.notify-big {
+  --van-notify-font-size: 20px !important;
+  --van-notify-line-height: 1.6 !important;
+  --van-notify-padding: 24px 20px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.5px !important;
+  min-height: 80px !important;
+}
+
+/* 響應式 - 大螢幕 */
+@media (min-width: 500px) {
+  .notify-big {
+    --van-notify-font-size: 22px !important;
+    --van-notify-padding: 28px 24px !important;
+    min-height: 100px !important;
+  }
+}
+
 /* ===== Custom Toast Styles - 手機優化版 ===== */
 
 /* 基礎 Toast 樣式 - 超大尺寸佔據 1/3 畫面 */

@@ -336,14 +336,16 @@ const checkStatus = async () => {
 
   try {
     let response;
+    let userId = null;
 
     if (USE_MOCK) {
       // Mock 模式：模擬延遲後返回假資料
       await new Promise(resolve => setTimeout(resolve, 800));
       response = MOCK_RESPONSE;
+      userId = 'MOCK_USER';
     } else {
       // 真實 API 模式
-      const userId = await getLiffUserId();
+      userId = await getLiffUserId();
 
       if (!userId) {
         error.value = '無法取得使用者資訊，請重新登入';

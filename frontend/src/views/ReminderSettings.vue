@@ -1,6 +1,6 @@
 <script setup>
 import { ref, reactive, onMounted, computed } from 'vue';
-import { showToast } from 'vant';
+import { showToast, closeToast } from 'vant';
 import liff from '@line/liff';
 import { reminderApi, userApi } from '@/services/api';
 import { userState } from '@/stores/userState';
@@ -159,10 +159,11 @@ const saveSettings = async () => {
       await new Promise(resolve => setTimeout(resolve, 500)); // 模擬延遲
       showToast({
         message: '✅ 設定已儲存',
-        duration: 3500,
+        duration: 0,
         className: 'toast-success',
         forbidClick: false
       });
+      setTimeout(() => closeToast(), 3500);
       return;
     }
 
@@ -175,26 +176,29 @@ const saveSettings = async () => {
     if (response.success) {
       showToast({
         message: '✅ 設定已儲存',
-        duration: 3500,
+        duration: 0,
         className: 'toast-success',
         forbidClick: false
       });
+      setTimeout(() => closeToast(), 3500);
     } else {
       showToast({
         message: '❌ ' + (response.error || '儲存失敗'),
-        duration: 3500,
+        duration: 0,
         className: 'toast-fail',
         forbidClick: false
       });
+      setTimeout(() => closeToast(), 3500);
     }
   } catch (err) {
     console.error('Save settings error:', err);
     showToast({
       message: '❌ ' + (err.message || '儲存失敗'),
-      duration: 3500,
+      duration: 0,
       className: 'toast-fail',
       forbidClick: false
     });
+    setTimeout(() => closeToast(), 3500);
   } finally {
     saving.value = false;
   }

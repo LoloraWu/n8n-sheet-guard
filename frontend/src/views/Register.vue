@@ -1,6 +1,6 @@
 <script setup>
 import { ref, reactive, onMounted, computed } from 'vue';
-import { showToast } from 'vant';
+import { showToast, closeToast } from 'vant';
 import liff from '@line/liff';
 import { userApi } from '@/services/api';
 import { userState } from '@/stores/userState';
@@ -368,10 +368,11 @@ const onSubmit = async () => {
       if (response && response.success) {
           showToast({ 
             message: isExistingUser.value ? '✅ 設定已更新' : '🎉 註冊成功！',
-            duration: 3500,
+            duration: 0,
             className: 'toast-success',
             forbidClick: false
           });
+          setTimeout(() => closeToast(), 3500);
           isExistingUser.value = true;
           // 同步到共享狀態（即時讓其他頁面知道）
           userState.setRegistered({
@@ -384,28 +385,31 @@ const onSubmit = async () => {
           // 後端回傳空內容 = 失敗
           showToast({ 
             message: '❌ 儲存失敗：伺服器無回應',
-            duration: 3500,
+            duration: 0,
             className: 'toast-fail',
             forbidClick: false
           });
+          setTimeout(() => closeToast(), 3500);
       } else {
           // 有回應但不是成功
           showToast({ 
             message: '❌ ' + (response?.error || '儲存失敗，請稍後再試'),
-            duration: 3500,
+            duration: 0,
             className: 'toast-fail',
             forbidClick: false
           });
+          setTimeout(() => closeToast(), 3500);
       }
       
   } catch (error) {
       console.error('API Error:', error);
       showToast({ 
         message: '❌ ' + (error.message || '儲存失敗，請檢查網路連線'),
-        duration: 3500,
+        duration: 0,
         className: 'toast-fail',
         forbidClick: false
       });
+      setTimeout(() => closeToast(), 3500);
   } finally {
       isLoading.value = false;
   }

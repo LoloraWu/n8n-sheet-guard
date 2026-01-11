@@ -198,16 +198,16 @@
     },
     {
       "parameters": {
-        "operation": "delete",
-        "documentId": { "__rl": true, "mode": "id", "value": "1Nn3tyYmGxioF6p_4i9vc6ABCn0NnsJu72FHC_Xlozxg" },
-        "sheetName": { "__rl": true, "mode": "name", "value": "Pending_Confirmations" },
-        "filters": { "conditions": [{ "lookupColumn": "User_ID", "lookupValue": "={{ $('Check Pending Status').item.json.userId }}" }] },
+        "method": "POST",
+        "url": "https://sheets.googleapis.com/v4/spreadsheets/1Nn3tyYmGxioF6p_4i9vc6ABCn0NnsJu72FHC_Xlozxg/values/Pending_Confirmations!A2:C1000:clear",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
         "options": {}
       },
-      "id": "sheets-delete-pending-clear-me",
+      "id": "http-delete-pending-clear-me",
       "name": "Delete Pending (clear-me)",
-      "type": "n8n-nodes-base.googleSheets",
-      "typeVersion": 4.5,
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
       "position": [1900, 200],
       "credentials": { "googleSheetsOAuth2Api": { "id": "n8n-sheet-guard-master", "name": "n8n-sheet-guard-master" } },
       "alwaysOutputData": true
@@ -241,7 +241,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// 準備 clear-all 刪除請求\n// 找到 Master_Sync sheet 的 sheetId\nconst sheetInfo = $input.first().json;\nconst masterSheet = sheetInfo.sheets.find(s => s.properties.title === 'Master_Sync');\n\nif (!masterSheet) {\n  throw new Error('找不到 Master_Sync 工作表');\n}\n\nconst sheetId = masterSheet.properties.sheetId;\nconst rowCount = masterSheet.properties.gridProperties.rowCount;\n\n// 取得 replyToken 和 userId\nconst replyToken = $('Check Pending Status').first().json.replyToken;\nconst userId = $('Check Pending Status').first().json.userId;\n\n// 如果只有 header row (rowCount <= 1)，則沒有資料可刪\nif (rowCount <= 1) {\n  return [{ json: { \n    replyToken, \n    message: '📭 沒有需要清空的資料。',\n    skipDelete: true,\n    deletedCount: 0\n  } }];\n}\n\n// 建立刪除請求：刪除從 row 2 到最後一行（0-indexed: startIndex=1）\nconst deleteRequest = {\n  requests: [{\n    deleteDimension: {\n      range: {\n        sheetId: sheetId,\n        dimension: 'ROWS',\n        startIndex: 1,  // 0-indexed, 所以 1 = row 2\n        endIndex: rowCount  // 刪除到最後\n      }\n    }\n  }]\n};\n\nreturn [{ json: { \n  replyToken,\n  userId,\n  deleteRequest,\n  skipDelete: false,\n  deletedCount: rowCount - 1  // 不包含 header\n} }];"
+        "jsCode": "// 準備 clear-all 刪除請求\n// 找到 Master_Sync 和 Pending_Confirmations 的 sheetId\nconst sheetInfo = $input.first().json;\nconst masterSheet = sheetInfo.sheets.find(s => s.properties.title === 'Master_Sync');\nconst pendingSheet = sheetInfo.sheets.find(s => s.properties.title === 'Pending_Confirmations');\n\nif (!masterSheet) {\n  throw new Error('找不到 Master_Sync 工作表');\n}\n\nconst masterSheetId = masterSheet.properties.sheetId;\nconst pendingSheetId = pendingSheet ? pendingSheet.properties.sheetId : null;\nconst rowCount = masterSheet.properties.gridProperties.rowCount;\n\n// 取得 replyToken 和 userId\nconst replyToken = $('Check Pending Status').first().json.replyToken;\nconst userId = $('Check Pending Status').first().json.userId;\n\n// 如果只有 header row (rowCount <= 1)，則沒有資料可刪\nif (rowCount <= 1) {\n  return [{ json: { \n    replyToken, \n    userId,\n    pendingSheetId,\n    message: '📭 沒有需要清空的資料。',\n    skipDelete: true,\n    deletedCount: 0\n  } }];\n}\n\n// 安全起見：確保至少保留 2 行（防止刪除標題）\nconst safeEndIndex = Math.max(rowCount, 2);\n\n// 建立刪除請求：刪除從 row 2 到最後一行（0-indexed: startIndex=1）\nconst deleteRequest = {\n  requests: [{\n    deleteDimension: {\n      range: {\n        sheetId: masterSheetId,\n        dimension: 'ROWS',\n        startIndex: 1,  // 0-indexed, 所以 1 = row 2（保留標題行）\n        endIndex: safeEndIndex\n      }\n    }\n  }]\n};\n\nreturn [{ json: { \n  replyToken,\n  userId,\n  pendingSheetId,\n  deleteRequest,\n  skipDelete: false,\n  deletedCount: safeEndIndex - 1\n} }];"
       },
       "id": "code-prepare-clear-all",
       "name": "Prepare Clear All",
@@ -283,16 +283,16 @@
     },
     {
       "parameters": {
-        "operation": "delete",
-        "documentId": { "__rl": true, "mode": "id", "value": "1Nn3tyYmGxioF6p_4i9vc6ABCn0NnsJu72FHC_Xlozxg" },
-        "sheetName": { "__rl": true, "mode": "name", "value": "Pending_Confirmations" },
-        "filters": { "conditions": [{ "lookupColumn": "User_ID", "lookupValue": "={{ $('Prepare Clear All').first().json.userId }}" }] },
+        "method": "POST",
+        "url": "https://sheets.googleapis.com/v4/spreadsheets/1Nn3tyYmGxioF6p_4i9vc6ABCn0NnsJu72FHC_Xlozxg/values/Pending_Confirmations!A2:C1000:clear",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
         "options": {}
       },
-      "id": "sheets-delete-pending-clear-all",
+      "id": "http-delete-pending-clear-all",
       "name": "Delete Pending (clear-all)",
-      "type": "n8n-nodes-base.googleSheets",
-      "typeVersion": 4.5,
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
       "position": [2500, 300],
       "credentials": { "googleSheetsOAuth2Api": { "id": "n8n-sheet-guard-master", "name": "n8n-sheet-guard-master" } },
       "alwaysOutputData": true

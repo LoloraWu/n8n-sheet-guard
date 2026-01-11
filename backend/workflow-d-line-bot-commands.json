@@ -241,7 +241,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// 準備 clear-all 刪除請求\n// 找到 Master_Sync 和 Pending_Confirmations 的 sheetId\nconst sheetInfo = $input.first().json;\nconst masterSheet = sheetInfo.sheets.find(s => s.properties.title === 'Master_Sync');\nconst pendingSheet = sheetInfo.sheets.find(s => s.properties.title === 'Pending_Confirmations');\n\nif (!masterSheet) {\n  throw new Error('找不到 Master_Sync 工作表');\n}\n\nconst masterSheetId = masterSheet.properties.sheetId;\nconst pendingSheetId = pendingSheet ? pendingSheet.properties.sheetId : null;\nconst rowCount = masterSheet.properties.gridProperties.rowCount;\n\n// 取得 replyToken 和 userId\nconst replyToken = $('Check Pending Status').first().json.replyToken;\nconst userId = $('Check Pending Status').first().json.userId;\n\n// 如果只有 header row (rowCount <= 1)，則沒有資料可刪\nif (rowCount <= 1) {\n  return [{ json: { \n    replyToken, \n    userId,\n    pendingSheetId,\n    message: '📭 沒有需要清空的資料。',\n    skipDelete: true,\n    deletedCount: 0\n  } }];\n}\n\n// 安全起見：確保至少保留 2 行（防止刪除標題）\nconst safeEndIndex = Math.max(rowCount, 2);\n\n// 建立刪除請求：刪除從 row 2 到最後一行（0-indexed: startIndex=1）\nconst deleteRequest = {\n  requests: [{\n    deleteDimension: {\n      range: {\n        sheetId: masterSheetId,\n        dimension: 'ROWS',\n        startIndex: 1,  // 0-indexed, 所以 1 = row 2（保留標題行）\n        endIndex: safeEndIndex\n      }\n    }\n  }]\n};\n\nreturn [{ json: { \n  replyToken,\n  userId,\n  pendingSheetId,\n  deleteRequest,\n  skipDelete: false,\n  deletedCount: safeEndIndex - 1\n} }];"
+        "jsCode": "// 準備 clear-all\n// 使用 values:clear API 清空資料，不需要構建複雜的刪除請求\nconst sheetInfo = $input.first().json;\nconst masterSheet = sheetInfo.sheets.find(s => s.properties.title === 'Master_Sync');\n\nif (!masterSheet) {\n  throw new Error('找不到 Master_Sync 工作表');\n}\n\nconst rowCount = masterSheet.properties.gridProperties.rowCount;\n\n// 取得 replyToken\nconst replyToken = $('Check Pending Status').first().json.replyToken;\n\n// 如果只有 header row (rowCount <= 1)，則沒有資料可刪\nif (rowCount <= 1) {\n  return [{ json: { \n    replyToken, \n    message: '📭 沒有需要清空的資料。',\n    skipDelete: true,\n    deletedCount: 0\n  } }];\n}\n\n// 計算要清空的資料行數（不含標題）\nconst deletedCount = rowCount - 1;\n\nreturn [{ json: { \n  replyToken,\n  skipDelete: false,\n  deletedCount\n} }];"
       },
       "id": "code-prepare-clear-all",
       "name": "Prepare Clear All",
@@ -266,16 +266,13 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "https://sheets.googleapis.com/v4/spreadsheets/1Nn3tyYmGxioF6p_4i9vc6ABCn0NnsJu72FHC_Xlozxg:batchUpdate",
+        "url": "https://sheets.googleapis.com/v4/spreadsheets/1Nn3tyYmGxioF6p_4i9vc6ABCn0NnsJu72FHC_Xlozxg/values/Master_Sync!A2:Z1000:clear",
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "googleSheetsOAuth2Api",
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify($json.deleteRequest) }}",
         "options": {}
       },
-      "id": "http-delete-all-rows",
-      "name": "Delete All Rows",
+      "id": "http-clear-all-rows",
+      "name": "Clear All Rows",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [2300, 300],
@@ -678,11 +675,11 @@
     },
     "Should Delete?": {
       "main": [
-        [{ "node": "Delete All Rows", "type": "main", "index": 0 }],
+        [{ "node": "Clear All Rows", "type": "main", "index": 0 }],
         [{ "node": "LINE Reply", "type": "main", "index": 0 }]
       ]
     },
-    "Delete All Rows": {
+    "Clear All Rows": {
       "main": [[{ "node": "Delete Pending (clear-all)", "type": "main", "index": 0 }]]
     },
     "Delete Pending (clear-all)": {
